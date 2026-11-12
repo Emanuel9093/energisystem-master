@@ -4,6 +4,7 @@ import { ALLOWED_EMAIL_DOMAINS } from "./config.js";
 import { pool, buildPool, courseById, coursesIn, courseData, offeringText, safeUrl } from "./pool.js";
 import * as store from "./store.js";
 import { guideHTML } from "./guide.js";
+import { eligibility } from "./prereq.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const app = $("#app");
@@ -329,7 +330,8 @@ function summerCard(y) {
     <div class="summer-list">
       ${items.map((it) => {
         const icon = it.status === "done" ? ICONS.lock : it.status === "ongoing" ? ICONS.clock : "";
-        return `<button class="pill ${it.status}" data-item="${esc(it.id)}" title="${esc(itemName(it))} – ${STATUSES[it.status]}${offPeriod(it) ? ". " + esc(offNote(it)) : ""}">${offPeriod(it) ? WARN : icon}<span class="pill-name">${esc(itemName(it))}</span><span class="hp">${itemHp(it)} hp</span></button>`;
+        const e = eligOf(it);
+        return `<button class="pill ${it.status}" data-item="${esc(it.id)}" title="${esc(itemName(it))} – ${STATUSES[it.status]}${offPeriod(it) ? ". " + esc(offNote(it)) : ""}${esc(eligTitle(e))}">${lamp(e)}${offPeriod(it) ? WARN : icon}<span class="pill-name">${esc(itemName(it))}</span><span class="hp">${itemHp(it)} hp</span></button>`;
       }).join("")}
       <button class="slot summer-add" id="add-summer-course">${ICONS.plus} Lägg till sommarkurs</button>
     </div>
@@ -358,13 +360,14 @@ function yearCard(y) {
 
   const pills = items.map((it) => {
     const rowSpan = it.thick ? thickRowsOf(y) : 1;
+    const e = eligOf(it);
     const icon = it.status === "done" ? ICONS.lock : it.status === "ongoing" ? ICONS.clock : "";
     const name = itemName(it);
     return `
       <button class="pill ${it.status} ${it.thick ? "thick" : ""}" data-item="${esc(it.id)}"
         style="grid-row:${(it.thick ? 0 : it.row) + 1} / span ${rowSpan};grid-column:${it.period} / span ${it.span}"
-        title="${esc(name)} – ${STATUSES[it.status]}${offPeriod(it) ? ". " + esc(offNote(it)) : ""}">
-        ${offPeriod(it) ? WARN : icon}<span class="pill-name">${esc(name)}</span><span class="hp">${itemHp(it)} hp</span>
+        title="${esc(name)} – ${STATUSES[it.status]}${offPeriod(it) ? ". " + esc(offNote(it)) : ""}${esc(eligTitle(e))}">
+        ${lamp(e)}${offPeriod(it) ? WARN : icon}<span class="pill-name">${esc(name)}</span><span class="hp">${itemHp(it)} hp</span>
       </button>`;
   }).join("");
 
@@ -569,6 +572,9 @@ function pickEntry(c, ctx) {
   const off = !placed && slot.offErr;
   const err = placed ? `Redan inlagd (${whenText(placed).toLowerCase()})` : off ? null : slot.err;
   const mates = matesFor(c.id).length;
+  const probe = !err && !off && !slot.err ? eligibility(state.plan, { id: "probe", code: c.id, year: ctx.year, period: slot.start, span: slot.span, summer: !!ctx.summer, status: "planned" }) : null;
+  const eligNote = probe && probe.state !== "ok"
+    ? `<span class="pick-elig ${probe.state}">${lamp(probe)}${ELIG_TEXT[probe.state]}: ${esc(probe.items.filter((i) => i.state !== "ok").map((i) => i.text).join(", "))}</span>` : "";
   const where = slot.err ? "" : ctx.summer ? "Hamnar på sommaren" : `Hamnar i period ${Number(slot.start)}${slot.span > 1 ? "–" + (Number(slot.start) + Number(slot.span) - 1) : ""}`;
   return `
     <button class="pick ${off ? "off" : ""}" data-pick="${esc(c.id)}" ${off ? 'data-off="1"' : ""} ${err ? "disabled" : ""}>
@@ -583,7 +589,7 @@ function pickEntry(c, ctx) {
         </span>
         ${err ? `<span class="pick-err">${esc(err)}</span>`
           : off ? `<span class="pick-warn">${esc(slot.err)} Klicka för att lägga till ändå.</span>`
-          : `<span class="pick-ok">${where}${replaces ? ` · ersätter ${esc(itemName(replaces))}` : ""}</span>`}
+          : `<span class="pick-ok">${where}${replaces ? ` · ersätter ${esc(itemName(replaces))}` : ""}</span>${eligNote}`}
       </span>
     </button>`;
 }
@@ -705,6 +711,17 @@ function offPeriod(it) {
 const offNote = (it) => `Ligger utanför kursens ordinarie perioder (ges ${offeringText(itemCourse(it)).join(", ")}).`;
 const WARN = `<span class="pill-warn" aria-hidden="true">!</span>`;
 
+// Behörighet visas bara för planerade kurser. Röd lampa = inte behörig, gul = behörig
+// först när planerade/pågående kurser blir klara.
+function eligOf(it) {
+  if (it.status !== "planned" || it.eligOk) return null;
+  const e = eligibility(state.plan, it);
+  return e && e.state !== "ok" ? e : null;
+}
+const ELIG_TEXT = { missing: "Du är inte behörig enligt planen", pending: "Du blir behörig när planerade kurser är klara" };
+const lamp = (e) => (e ? `<span class="lamp ${e.state}" aria-label="${ELIG_TEXT[e.state]}"></span>` : "");
+const eligTitle = (e) => (e ? `. ${ELIG_TEXT[e.state]}: ${e.items.filter((i) => i.state !== "ok").map((i) => i.text).join(", ")}` : "");
+
 // Dialogen används av kursväljaren, kursdetaljer och kurspoolens formulär.
 let dlgHandler = null;
 dlg.addEventListener("click", (ev) => {
@@ -732,6 +749,14 @@ dlg.addEventListener("click", (ev) => {
   if (st) {
     const it = state.plan.items.find((x) => x.id === st.dataset.id);
     it.status = st.dataset.setStatus;
+    changed();
+    renderPlan();
+    return openItem(it.id);
+  }
+  const eo = ev.target.closest("[data-elig-ok]");
+  if (eo) {
+    const it = state.plan.items.find((x) => x.id === eo.dataset.eligOk);
+    if (eo.checked) it.eligOk = true; else delete it.eligOk;
     changed();
     renderPlan();
     return openItem(it.id);
@@ -791,6 +816,7 @@ function openItem(id) {
     </div>
     ${offPeriod(it) ? `<div class="warn-box small">${esc(offNote(it))}</div>` : ""}
     ${c?.prereq ? `<p class="small"><strong>Behörighet:</strong> ${esc(c.prereq)}</p>` : ""}
+    ${eligBlock(it)}
     ${c?.note ? `<p class="small muted">${esc(c.note)}</p>` : ""}
     <h3 class="pick-h">Status</h3>
     <div class="seg" role="group" aria-label="Status">
@@ -805,6 +831,21 @@ function openItem(id) {
       <button class="btn danger" data-remove="${esc(it.id)}">Ta bort från planen</button>
       <button class="btn" data-close>Klar</button>
     </div>`);
+}
+
+function eligBlock(it) {
+  if (it.status !== "planned") return "";
+  const e = eligibility(state.plan, it);
+  if (!e) return "";
+  const icon = { ok: "✓", pending: "…", missing: "✗" };
+  const head = it.eligOk ? "Du har markerat att du är behörig." : e.state === "ok" ? "Du är behörig." : ELIG_TEXT[e.state] + ".";
+  return `
+    <div class="elig-box ${it.eligOk ? "ok" : e.state}">
+      <strong>${it.eligOk ? "" : lamp(e.state === "ok" ? null : e)} ${esc(head)}</strong>
+      <ul>${e.items.map((i) => `<li class="${i.state}"><span>${icon[i.state]}</span>${esc(i.text)}${i.detail && i.state !== "ok" ? ` <span class="muted">(${esc(i.detail)})</span>` : ""}</li>`).join("")}</ul>
+      <p class="muted small">Kontrollen räknar bara hp och kurser i din plan som slutar före kursen. Krav som gymnasiekurser och Engelska 6 kontrolleras inte.</p>
+      <label class="check small"><input type="checkbox" data-elig-ok="${esc(it.id)}" ${it.eligOk ? "checked" : ""}> Jag är behörig ändå (till exempel tillgodoräknat eller dispens)</label>
+    </div>`;
 }
 
 // ---------- Examenskrav ----------

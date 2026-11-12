@@ -140,8 +140,9 @@ export function evaluate(plan, statuses = ["done", "ongoing", "planned"]) {
   for (const [a, b] of conflicts) {
     warnings.push(`${a.name} (${a.code}) och ${b.name} (${b.code}) kan inte båda räknas in i examen. Bara den första räknas.`);
   }
-  if (total > 300) {
-    warnings.push(`Planen har ${total} hp. Examen omfattar 300 hp, så alla kurser behöver inte ingå.`);
+  // En examen på 300–304.5 hp är okej. Först vid 305 hp ingår kurser som inte behövs.
+  if (total >= 305) {
+    warnings.push(`Planen har ${total} hp. Examen omfattar 300 hp (upp till 304,5 hp går bra), så alla kurser behöver inte ingå.`);
   }
 
   return {

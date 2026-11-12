@@ -1,0 +1,190 @@
+// Behörighetskontroll. Kraven är förenklade från kursernas behörighetstexter:
+// vi räknar bara hp (totalt, inom teknik/naturvetenskap, per huvudområde och på avancerad
+// nivå) och kursspecifika krav. Gymnasiekurser, Engelska 6 o.d. antar vi att alla har.
+//
+// Format per kurs:
+//   hp:    { total, tn, adv, Teknik, Matematik, Fysik, Kemi, Biologi }   minsta antal hp
+//   c:     ["1MA013", "1TD433|1TD342", "~1MA016"]
+//          varje sträng är ett krav, "|" = någon av kurserna, "~" = får läsas parallellt
+
+import { pool, courseById } from "./pool.js";
+
+export const REQS = {
+  // Årskurs 1–3
+  "1MA013": { c: ["~1MA090"] },
+  "1FA105": { c: ["1MA090"] },
+  "1MA016": { c: ["1MA013", "1MA090"] },
+  "1FA102": { c: ["1FA105", "~1MA016"] },
+  MS0073: { hp: { Matematik: 15 } },
+  "1FA514": { c: ["1MA090", "1MA013", "1TD433|1TD342", "~1MA016", "~1FA105"] },
+  "1FA527": { c: ["1MA013", "1MA016", "1FA105", "1TD342|1TD433"] },
+  KE0079: { c: ["KE0049"] },
+  "1EL016": { c: ["1MA013", "1MA016", "1FA102"] },
+  "1MA024": { c: ["1MA013", "1MA090"] },
+  "1EL004": { hp: { Matematik: 15 }, c: ["1FA514", "1MA090", "1MA013", "1FA105"] },
+  TN0373: { hp: { tn: 50 }, c: ["1TD433|1TD342", "MS0073"] },
+  "1TD342": { c: ["~1TD433", "1MA013"] },
+  "FÖ0498": { hp: { Teknik: 10, Matematik: 5 } },
+  "1TD352": { hp: { total: 60 }, c: ["1MA090", "1TD433", "1TD342", "MS0073", "1MA024"] },
+  TN0285: { hp: { tn: 60, Teknik: 30 } },
+  "1MA034": { hp: { Matematik: 5 }, c: ["1MA013", "1MA090"] },
+  "1FA540": { c: ["1FA527", "1TD342|1TD433", "KE0049", "1EL016"] },
+  KE0069: { hp: { Kemi: 10, Biologi: 5, Teknik: 10 }, c: ["MS0073"] },
+  "1TE655": { hp: { tn: 60 }, c: ["1MA034", "1FA514", "1EL004"] },
+  "1RT490": { hp: { tn: 60 }, c: ["1MA013", "1MA024", "1MA034"] },
+  "1TE078": { hp: { tn: 40 }, c: ["1MA090", "1FA105", "1FA102"] },
+  "1TE061": { hp: { tn: 40 } },
+  "1TE687": { hp: { Teknik: 30 } },
+  "2JS905": { hp: { tn: 30 } },
+  "1TE642": { hp: { tn: 20 } },
+  "1FA522": { hp: { tn: 60 }, c: ["1FA102", "1FA514"] },
+  "1TE654": { hp: { tn: 30 }, c: ["1MA013", "1FA105"] },
+  "1FA311": { hp: { total: 120 }, c: ["MS0073"] },
+  EX0946: { hp: { total: 120 }, c: ["MS0073"] },
+
+  // Årskurs 4–5
+  "1FA410": { hp: { tn: 120 }, c: ["1TD342|1TD433", "1FA527", "1TE078"] },
+  "1TE029": { hp: { tn: 120 }, c: ["1TE655", "~1FA105"] },
+  "1TE035": { hp: { tn: 120 }, c: ["1FA527", "1RT490"] },
+  "1TE765": { hp: { tn: 120 }, c: ["1EL004", "~1MA034"] },
+  MX0162: { hp: { total: 120, tn: 90 } },
+  "1TS359": { hp: { tn: 120 }, c: ["TN0367", "TN0373", "1TE655"] },
+  TE0018: { hp: { total: 120, tn: 90 } },
+  "1TS309": { hp: { tn: 120 }, c: ["1EL016", "1FA527", "1TD342", "TN0373", "TN0285", "FÖ0498"] },
+  TN0352: { hp: { total: 120, Teknik: 70, Biologi: 5 }, c: ["1FA540"] },
+  "1TE038": { hp: { tn: 120 }, c: ["1MA016", "1FA514", "1RT490", "MS0073", "~1FA105"] },
+  "1TE043": { hp: { tn: 120 }, c: ["1TD342", "1TE655", "1FA105"] },
+  "1GV334": { hp: { total: 120 }, c: ["1TD342", "1TD352", "MS0073", "1TE655", "1FA527|1EL016"] },
+  "1FA412": { hp: { tn: 120 }, c: ["1TE078", "1FA410|1FA456"] },
+  "1TS356": { hp: { tn: 120 }, c: ["1FA527", "TN0373", "1TD433", "1TD352"] },
+  TN0365: { hp: { tn: 120, Teknik: 30 }, c: ["MS0073"] },
+  "1RT495": { hp: { total: 120 }, c: ["1RT490"] },
+  "1FA591": { hp: { tn: 120 }, c: ["1TD352", "MS0073", "1TE655", "1FA527"] },
+  "1RT890": { hp: { total: 120 }, c: ["1RT490", "MS0073"] },
+  "1TE028": { hp: { tn: 120 }, c: ["1TE078"] },
+  TN0347: { hp: { adv: 30 }, c: ["1FA311", "TN0285"] },
+  "1TE700": { hp: { total: 130, adv: 5 }, c: ["1TD342", "1TE655", "1RT490", "1TE038|1TE043|~1TE029"] },
+  "1KB274": { hp: { tn: 120 }, c: ["1TE655", "1RT490", "1TD342"] },
+  TN0350: { hp: { tn: 120, Biologi: 5, adv: 10 }, c: ["FÖ0498", "TN0285"] },
+  "1FA594": { hp: { tn: 150, adv: 30 }, c: ["MS0073", "~1FA410|~1TE029|~1TE700|~1TE038|~1TE043"] },
+  "5LH654": { hp: { tn: 120 } },
+  "1TE065": { hp: { tn: 150, adv: 10 }, c: ["1FA514", "1FA105", "1TE655", "1TE038|1TE029|1TE043|1TE700"] },
+  "1TE724": { hp: { tn: 180, adv: 10 }, c: ["1TE078", "~1TE028"] },
+  "1FA392": { hp: { total: 240 }, c: ["1FA311"] },
+  EX1032: { hp: { total: 240 }, c: ["1FA311"] },
+  "1TD354": { hp: { tn: 120 }, c: ["1TD342", "1MA016", "1MA024"] },
+  "1TE737": { hp: { tn: 120, adv: 10 }, c: ["1RT490", "1TE765"] },
+  "1FA452": { hp: { tn: 120, Matematik: 30, Fysik: 35 }, c: ["1FA410"] },
+  "1RT700": { hp: { total: 120 }, c: ["MS0073", "1MA024", "1MA013", "1TD433"] },
+  "1EL009": { hp: { total: 120, adv: 5 }, c: ["1TE655"] },
+  "1TE649": { hp: { total: 50, Matematik: 10 }, c: ["1TD342"] },
+  "1FA393": { hp: { total: 100 } },
+  TE0024: { hp: { total: 100 } },
+  "1FA394": { hp: { total: 130, adv: 10 } },
+  TE0023: { hp: { total: 130, adv: 10 } },
+  "1FA456": { hp: { tn: 120, Fysik: 30 }, c: ["1TD433|1TD342"] },
+
+  // Kurser utanför studieplanen
+  "1TE674": { hp: { total: 200, tn: 150, adv: 30 } },
+  "1MA349": { hp: { Matematik: 5 } },
+  "1MA007": { hp: { Matematik: 60 }, c: ["1MA024", "~1MA349"] },
+  "1MA022": { hp: { Matematik: 30 }, c: ["1MA016"] },
+  "1MA032": { hp: { Matematik: 10 }, c: ["1MA024", "~1MA016"] },
+  "1MA211": { hp: { Matematik: 15 }, c: ["1MA016", "1MA024"] },
+  "1MS034": { hp: { Matematik: 10 }, c: ["1MA016"] },
+  "1MS035": { hp: { Matematik: 15 }, c: ["1MS034"] },
+  "1MS036": { hp: { total: 60, Matematik: 20 }, c: ["1MS034", "1MA016", "1MA024"] },
+  "1MA053": { hp: { total: 120, Matematik: 60 }, c: ["1MA016", "1MA024", "1MA034|1MA211"] },
+  "1MA331": { hp: { total: 120, Matematik: 90 }, c: ["1MA024", "1MA226"] },
+  "1MA215": { hp: { total: 120, Matematik: 90 }, c: ["1MA226"] },
+  "1MS030": { hp: { total: 120, Matematik: 90 }, c: ["1MA215", "1MS036"] },
+  "1MS014": { hp: { tn: 120 }, c: ["1MS035|MS0073"] },
+  "1TD186": { hp: { tn: 120 }, c: ["1TD342"] },
+  "1MA079": { hp: { Matematik: 60 }, c: ["1MA016", "1MA024"] },
+};
+
+// Huvudområden som inte räknas som teknik/naturvetenskap
+const NOT_TN = new Set(["Företagsekonomi", "Idéhistoria", "Juridik", "Rättsvetenskap", "Nationalekonomi", "Statskunskap", "Kulturgeografi"]);
+
+const HP_LABEL = {
+  total: "totalt", tn: "inom teknik/naturvetenskap", adv: "på avancerad nivå",
+  Teknik: "inom teknik", Matematik: "matematik", Fysik: "fysik", Kemi: "kemi", Biologi: "biologi",
+};
+
+// Tidsläge i "periodsteg": varje år har period 1–4 och sommaren som steg 5.
+const startOf = (it) => (it.year - 1) * 5 + (it.summer ? 5 : it.period);
+const endOf = (it) => startOf(it) + (it.summer ? 0 : it.span - 1);
+
+// Vad en kurs i planen ger: hp, huvudområden, nivå och vilka kurskoder den motsvarar.
+function facts(it) {
+  const c = it.code ? courseById(it.code) : null;
+  const x = c || it.custom || it.snap || {};
+  const hp = Number(x.hp) || 0;
+  const areas = c ? c.areas : x.teknik ? ["Teknik"] : [];
+  const level = String(x.level || "");
+  const codes = new Set();
+  if (c) {
+    codes.add(c.id);
+    // Varianter (UU/SLU eller äldre kurs) räknas som samma kurs
+    if (c.oneOf) for (const id of groupMembers(c.oneOf)) codes.add(id);
+  } else if (it.code) codes.add(it.code);
+  return { hp, areas, adv: level.startsWith("A"), tn: areas.some((a) => !NOT_TN.has(a)) || (!c && !!x.teknik), codes };
+}
+
+// Alla kurser i samma oneOf-grupp i kurspoolen.
+const groupMembers = (group) => pool.courses.filter((c) => c.oneOf === group).map((c) => c.id);
+
+const describeCodes = (alts) => alts.map((a) => courseById(a.replace("~", ""))?.name || a.replace("~", "")).join(" eller ");
+
+// Behörighet för en kurs i planen.
+// Returnerar null om kursen saknar krav eller inte är planerad, annars
+// { state: "ok" | "pending" | "missing", items: [{ text, state }] }
+export function eligibility(plan, item) {
+  const req = item.code ? REQS[item.code] : null;
+  if (!req) return null;
+  const s = startOf(item), e = endOf(item);
+  const others = plan.items.filter((x) => x !== item && x.id !== item.id);
+  const before = others.filter((x) => endOf(x) < s);
+  const parallel = others.filter((x) => startOf(x) <= e);
+
+  const sum = (list, key) => {
+    const seen = new Set();
+    let n = 0;
+    for (const x of list) {
+      const f = facts(x);
+      const k = x.code || x.id;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      if (key === "total" || (key === "tn" && f.tn) || (key === "adv" && f.adv) || f.areas.includes(key)) n += f.hp;
+    }
+    return n;
+  };
+  const done = (list) => list.filter((x) => x.status === "done");
+
+  const items = [];
+  for (const [key, need] of Object.entries(req.hp || {})) {
+    const hd = sum(done(before), key), ha = sum(before, key);
+    items.push({
+      text: `${need} hp ${HP_LABEL[key] || key.toLowerCase()}`,
+      detail: ha >= need && hd < need ? `${hd} hp klara, ${ha} hp med planerade kurser` : `${ha} hp innan kursen`,
+      state: hd >= need ? "ok" : ha >= need ? "pending" : "missing",
+    });
+  }
+  for (const group of req.c || []) {
+    const alts = group.split("|");
+    const has = (list) => alts.some((a) => {
+      const par = a.startsWith("~");
+      const code = a.replace("~", "");
+      return (par ? list.parallel : list.before).some((x) => facts(x).codes.has(code));
+    });
+    const okDone = has({ before: done(before), parallel: done(parallel) });
+    const okAll = has({ before, parallel });
+    const par = alts.some((a) => a.startsWith("~"));
+    items.push({
+      text: describeCodes(alts) + (par ? " (får läsas parallellt)" : ""),
+      state: okDone ? "ok" : okAll ? "pending" : "missing",
+    });
+  }
+  const state = items.some((i) => i.state === "missing") ? "missing" : items.some((i) => i.state === "pending") ? "pending" : "ok";
+  return { state, items };
+}

@@ -27,6 +27,7 @@ function cleanItem(it) {
   // Sommarkurs: sommaren efter år `year`, en enda period, `row` är ordningen i listan.
   if (it.summer) Object.assign(out, { summer: true, year: int(it.year, 1, 4, 1), period: 1, span: 1, thick: false, row: int(it.row, 0, 99, 0) });
   if (it.code) out.code = txt(it.code, 40);
+  if (it.eligOk) out.eligOk = true; // "Jag är behörig ändå"
   if (it.custom && typeof it.custom === "object") {
     const c = it.custom;
     out.custom = { name: txt(c.name, 160) || "Namnlös kurs", code: txt(c.code, 20), hp: Math.max(0, Math.min(60, Number(c.hp) || 0)), level: txt(c.level, 4), teknik: !!c.teknik };

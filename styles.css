@@ -489,7 +489,7 @@ legend { font-size: 13px; font-weight: 700; color: var(--accent); padding: 0 4px
   .year-tabs .sum-full { display: none; } .year-tabs .sum-short { display: inline; }
 }
 .summer-list { display: flex; flex-direction: column; gap: 8px; }
-.summer-list .pill { margin: 0; min-height: 44px; }
+.summer-list .pill { margin: 0; min-height: 44px; position: relative; }
 .summer-list .summer-add {
   position: static; border-left: 2px dashed var(--border); min-height: 44px; border: 2px dashed var(--border); border-radius: 12px; color: var(--accent);
   display: flex; gap: 6px; align-items: center; justify-content: center; font: inherit; font-weight: 700; background: none;
@@ -542,3 +542,30 @@ button.person:hover { background: var(--accent-soft); outline: 1px solid var(--e
   flex: none; width: 18px; height: 18px; border-radius: 50%; display: inline-grid; place-items: center;
   background: var(--warn); color: var(--surface); font-size: 12px; font-weight: 800;
 }
+
+/* Behörighetslampor */
+.pill { position: relative; }
+.lamp {
+  position: absolute; top: -2px; right: -2px; width: 13px; height: 13px; border-radius: 50%;
+  border: 2px solid var(--surface); z-index: 2;
+}
+.lamp.missing { background: #d93a2b; box-shadow: 0 0 6px rgb(217 58 43 / 0.7); }
+.lamp.pending { background: #f2b705; box-shadow: 0 0 6px rgb(242 183 5 / 0.7); }
+.pick-elig { display: flex; align-items: center; gap: 6px; font-size: 12.5px; margin-top: 3px; }
+.pick-elig.missing { color: var(--bad); }
+.pick-elig.pending { color: var(--warn); }
+.pick-elig .lamp, .elig-box .lamp { position: static; display: inline-block; width: 10px; height: 10px; border: 0; flex: none; vertical-align: 0; }
+.elig-box { border-radius: 12px; padding: 10px 12px; margin: 10px 0; background: var(--surface-2); font-size: 14px; }
+.elig-box.missing { background: var(--bad-soft); }
+.elig-box.pending { background: var(--warn-soft); }
+.elig-box.ok { background: var(--ok-soft); }
+.elig-box ul { list-style: none; margin: 8px 0; padding: 0; }
+.elig-box li { display: flex; gap: 8px; padding: 2px 0; }
+.elig-box li > span:first-child { width: 14px; flex: none; font-weight: 800; }
+.elig-box li.ok > span:first-child { color: var(--ok); }
+.elig-box li.pending > span:first-child { color: var(--warn); }
+.elig-box li.missing > span:first-child { color: var(--bad); }
+.elig-box .check { margin-top: 4px; }
+.lamp-demo { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: 0; }
+.lamp-demo.missing { background: #d93a2b; }
+.lamp-demo.pending { background: #f2b705; }

@@ -41,7 +41,7 @@ export function guideHTML() {
 
         <h3>Kraven som sidan kontrollerar</h3>
         <ol class="req-list">
-          <li><strong>300 hp totalt</strong> med godkända kurser.</li>
+          <li><strong>300 hp totalt</strong> med godkända kurser. Det går bra att ta ut examen med upp till 304,5 hp.</li>
           <li><strong>Alla obligatoriska kurser</strong> i studieplanen. Självständigt arbete och examensarbete kan läsas vid UU eller SLU, men bara en av varianterna räknas. Har du läst de äldre kurserna Strömningsmekanik för energirelaterade tillämpningar (1FA529) eller Termokemisk omvandling (TN0319) räknas de i stället för Strömningsmekanik (1EL016) respektive Produktion och transport av värme (1FA540).</li>
           <li><strong>Examensarbete 30 hp</strong> på A2E-nivå inom teknik (termin 10).</li>
           <li><strong>Minst 90 hp på avancerad nivå</strong> (A1N, A1F, A2E), examensarbetet inräknat. Exjobbet och tre teknik och system-kurser ger 60 hp, så du behöver minst 30 hp till på avancerad nivå.</li>
@@ -75,6 +75,7 @@ export function guideHTML() {
           <li>Varje år har fyra läsperioder: HT är period 1–2 och VT är period 3–4.</li>
           <li>Tre rader motsvarar normal studietakt (15 hp per period). Läser du utökat klickar du på <em>Lägg till rad</em>.</li>
           <li>Kurser som går över två perioder blir långa. Självständigt arbete och examensarbete tar alla tre rader.</li>
+          <li><strong>Behörighet:</strong> planerade kurser får en <span class="lamp-demo missing"></span> röd lampa om du inte är behörig enligt din plan och en <span class="lamp-demo pending"></span> gul lampa om du blir behörig när dina planerade kurser är klara. Klicka på kursen för att se vad som saknas. Sidan räknar bara hp (totalt, per huvudområde och på avancerad nivå) och vilka kurser du har läst före kursen. Krav som Engelska 6 kontrolleras inte. Har du tillgodoräknat något kan du bocka i <em>Jag är behörig ändå</em>.</li>
           <li><strong>Sommarkurser:</strong> klicka på plustecknet mellan två år för att lägga till en sommar. Sommaren har en enda period och visas som en lista. Sommarkurser kan bara läggas på en sommar.</li>
           <li>Papperskorgen till höger tar bort en rad. Knapparna under rutnätet fyller i årets obligatoriska kurser, markerar hela året som klart eller tömmer året.</li>
         </ul>
