@@ -86,7 +86,11 @@ export function evaluate(plan, statuses = ["done", "ongoing", "planned"]) {
       if (groupsDone.has(c.oneOf)) continue;
       groupsDone.add(c.oneOf);
       const alts = studyPlan.filter((x) => x.oneOf === c.oneOf);
-      if (!alts.some((a) => codes.has(a.code))) missing.push({ ...c, name: c.name.replace(" (SLU)", "") + " (UU eller SLU)" });
+      if (!alts.some((a) => codes.has(a.code))) {
+        const uuSlu = alts.every((a) => a.name.replace(" (SLU)", "") === c.name.replace(" (SLU)", ""));
+        const name = uuSlu ? c.name.replace(" (SLU)", "") + " (UU eller SLU)" : `${c.name} (eller ${alts.filter((a) => a !== c).map((a) => a.name).join(", ")})`;
+        missing.push({ ...c, name });
+      }
     } else if (!codes.has(c.code)) {
       missing.push(c);
     }

@@ -1,6 +1,8 @@
 // Behörighet (sammanfattad) och länk till kurssidan, hämtat från uu.se och slu.se i november 2026.
 // Studenterna kan ändra uppgifterna i Kurspoolen; ändringarna sparas i databasen.
 export const INFO = {
+  "1FA529": { "prereq": "Äldre kurs i programmet.", "url": "https://www.uu.se/utbildning/kurs?query=1FA529" },
+  "TN0319": { "prereq": "Äldre kurs i programmet.", "url": "https://www.slu.se/en/student-web/studies/courses-and-programmes/course-search/kurser/t/thermochemical-conversion/" },
   "1MA090": {
     "prereq": "Grundläggande behörighet och Matematik fortsättning nivå 2 alternativt Matematik 4/Matematik E.",
     "url": "https://www.uu.se/utbildning/kurs?query=1MA090"

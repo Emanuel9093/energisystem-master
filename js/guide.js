@@ -42,7 +42,7 @@ export function guideHTML() {
         <h3>Kraven som sidan kontrollerar</h3>
         <ol class="req-list">
           <li><strong>300 hp totalt</strong> med godkända kurser.</li>
-          <li><strong>Alla obligatoriska kurser</strong> i studieplanen. Självständigt arbete och examensarbete kan läsas vid UU eller SLU, men bara en av varianterna räknas.</li>
+          <li><strong>Alla obligatoriska kurser</strong> i studieplanen. Självständigt arbete och examensarbete kan läsas vid UU eller SLU, men bara en av varianterna räknas. Har du läst de äldre kurserna Strömningsmekanik för energirelaterade tillämpningar (1FA529) eller Termokemisk omvandling (TN0319) räknas de i stället för Strömningsmekanik (1EL016) respektive Produktion och transport av värme (1FA540).</li>
           <li><strong>Examensarbete 30 hp</strong> på A2E-nivå inom teknik (termin 10).</li>
           <li><strong>Minst 90 hp på avancerad nivå</strong> (A1N, A1F, A2E), examensarbetet inräknat. Exjobbet och tre teknik och system-kurser ger 60 hp, så du behöver minst 30 hp till på avancerad nivå.</li>
           <li><strong>Minst 150 hp inom huvudområdet teknik</strong>, varav <strong>minst 60 hp på avancerad nivå</strong>.</li>
