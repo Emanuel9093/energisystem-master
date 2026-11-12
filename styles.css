@@ -592,3 +592,16 @@ button.person:hover { background: var(--accent-soft); outline: 1px solid var(--e
 .area-panel tr.main td { font-weight: 800; font-size: 14.5px; }
 .area-panel tr.adv td { border-bottom: 2px solid var(--border); }
 .area-panel p { margin: 8px 0 0; }
+
+/* Osparade ändringar */
+.unsaved {
+  position: fixed; inset: 0; z-index: 5; display: grid; place-items: center; padding: 16px;
+  background: rgb(10 30 30 / 0.35);
+}
+.unsaved-box {
+  max-width: 420px; width: 100%; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; box-shadow: 0 12px 40px rgb(0 0 0 / 0.2); padding: 18px 20px;
+}
+.unsaved-box h3 { margin: 0 0 4px; }
+.unsaved-box p { margin: 0 0 14px; }
+.unsaved-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }

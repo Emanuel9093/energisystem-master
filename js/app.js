@@ -746,8 +746,58 @@ const eligTitle = (e) => (e ? `. ${ELIG_TEXT[e.state]}: ${e.items.filter((i) => 
 
 // Dialogen används av kursväljaren, kursdetaljer och kurspoolens formulär.
 let dlgHandler = null;
+
+// Osparade ändringar: formulär i kurspoolen registrerar sig med guardForm().
+// Försöker man stänga med ändringar kvar får man välja att spara, slänga eller fortsätta.
+let dlgDirty = null;
+const formSnapshot = (form) => JSON.stringify([...new FormData(form)]);
+function guardForm(form) {
+  const start = formSnapshot(form);
+  dlgDirty = () => form.isConnected && formSnapshot(form) !== start;
+}
+function requestClose() {
+  if (!dlgDirty?.()) return dlg.close();
+  if (dlg.querySelector(".unsaved")) return;
+  dlg.insertAdjacentHTML("beforeend", `
+    <div class="unsaved" role="alertdialog" aria-labelledby="unsaved-h">
+      <div class="unsaved-box">
+        <h3 id="unsaved-h">Du har osparade ändringar</h3>
+        <p class="muted">Vill du spara ändringarna innan du stänger?</p>
+        <div class="unsaved-actions">
+          <button type="button" class="btn ghost" data-unsaved="keep">Fortsätt ändra</button>
+          <button type="button" class="btn danger" data-unsaved="discard">Släng ändringar</button>
+          <button type="button" class="btn primary" data-unsaved="save">Spara</button>
+        </div>
+      </div>
+    </div>`);
+  dlg.querySelector('[data-unsaved="save"]').focus();
+}
+dlg.addEventListener("cancel", (ev) => {
+  if (dlg.querySelector(".unsaved")) { ev.preventDefault(); dlg.querySelector(".unsaved").remove(); return; }
+  if (dlgDirty?.()) { ev.preventDefault(); requestClose(); }
+});
+addEventListener("beforeunload", (ev) => {
+  if (dlg.open && dlgDirty?.()) { ev.preventDefault(); ev.returnValue = ""; }
+});
+
+// Klick utanför själva dialogrutan (på bakgrunden)
+const onBackdrop = (ev) => {
+  if (ev.target !== dlg) return false;
+  const r = dlg.getBoundingClientRect();
+  return ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom;
+};
+
 dlg.addEventListener("click", (ev) => {
-  if (ev.target === dlg || ev.target.closest("[data-close]")) return dlg.close();
+  const un = ev.target.closest("[data-unsaved]");
+  if (un) {
+    const choice = un.dataset.unsaved;
+    dlg.querySelector(".unsaved")?.remove();
+    if (choice === "discard") { dlgDirty = null; dlg.close(); }
+    if (choice === "save") dlg.querySelector("form")?.requestSubmit();
+    return;
+  }
+  if (dlg.querySelector(".unsaved")) return;
+  if (onBackdrop(ev) || ev.target.closest("[data-close]")) return requestClose();
   const person = ev.target.closest("[data-person]");
   if (person) return openPerson(Number(person.dataset.person));
   if (dlgHandler) return dlgHandler(ev);
@@ -807,10 +857,11 @@ dlg.addEventListener("click", (ev) => {
     renderPlan();
   }
 });
-dlg.addEventListener("close", () => { state.picker = null; dlgHandler = null; });
+dlg.addEventListener("close", () => { state.picker = null; dlgHandler = null; dlgDirty = null; });
 
 function openDialog(html, handler = null) {
   dlgHandler = handler;
+  dlgDirty = null;
   dlg.innerHTML = html;
   if (!dlg.open) dlg.showModal();
 }
@@ -1151,6 +1202,7 @@ function openFolderEditor(folder) {
       });
     }
   });
+  guardForm($("#folder-form"));
   $("#folder-form").onsubmit = async (ev) => {
     ev.preventDefault();
     const fd = new FormData(ev.target);
@@ -1176,6 +1228,7 @@ function openFolderPicker(c) {
       </div>
       <div class="dlg-foot"><span></span><button class="btn primary" type="submit">Spara</button></div>
     </form>`);
+  guardForm($("#fp-form"));
   $("#fp-form").onsubmit = async (ev) => {
     ev.preventDefault();
     const folders = new FormData(ev.target).getAll("f");
@@ -1231,6 +1284,7 @@ function openCourseEditor(c) {
       <div class="dlg-foot"><button type="button" class="btn" data-close>Avbryt</button><button class="btn primary" type="submit">Spara</button></div>
     </form>`);
 
+  guardForm($("#course-form"));
   $("#course-form").onsubmit = async (ev) => {
     ev.preventDefault();
     const fd = new FormData(ev.target);
