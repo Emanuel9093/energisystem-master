@@ -85,10 +85,10 @@ async function afterLogin() {
   } catch (e) {
     return showError(e);
   }
-  // Nya planer: år 3 fylls i med de obligatoriska kurserna som klara
+  // Nya planer: år 1–3 fylls i med de obligatoriska kurserna som klara
   if (state.plan.isNew) {
     delete state.plan.isNew;
-    fillMandatory(3, "done", true);
+    for (const y of [1, 2, 3]) fillMandatory(y, "done", true);
   }
   render();
 }

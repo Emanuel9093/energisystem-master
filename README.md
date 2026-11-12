@@ -18,7 +18,7 @@ En webbsida för oss på Civilingenjörsprogrammet i energisystem (TES2Y, UU/SLU
 - **Kurspoolen**: alla kurser med behörighet, huvudområden och när de ges (HT/VT, period). Kurserna ligger i mappar: *Programplanen*, *Teknikbaserat entreprenörskap* och *Övrig matematik*. Alla kan skapa nya mappar, lägga till kurser, ändra kurser (t.ex. att en kurs ges både HT och VT) och flytta kurser mellan mappar. Ändringar i studieplanens kurser kan återställas. Kursväljaren i Min plan hämtar kurserna härifrån.
 - **Mina betyg**: fyll i betyg (3/4/5/G/VG) för kurser som är klara. Viktat och oviktat snitt räknas ut automatiskt. Betygen sparas privat och visas aldrig för klasskompisar.
 
-År 3 fylls i automatiskt med de obligatoriska kurserna (markerade som klara) när någon skapar sin plan. De går att ta bort om man har tillgodoräknat något annat.
+År 1–3 fylls i automatiskt med de obligatoriska kurserna (markerade som klara) när någon skapar sin plan. De går att ta bort om man har tillgodoräknat något annat.
 
 Kraven och kurserna kommer från [utbildningsplanen](https://www.uu.se/utbildning/utbildningsplan?query=8e0ca779-e57a-11f0-af1e-4773ce254d84) och [studieplanen](https://www.uu.se/utbildning/studieplan?query=10067), giltiga från HT 2026. Studieplanens kurser finns i `js/courses.js`, behörigheterna i `js/course-info.js`, mapparna och kurserna utanför studieplanen i `js/folders.js` och reglerna i `js/rules.js`. Sidan är ett hjälpmedel. Det är Examensenheten som avgör om du får ut examen.
 
