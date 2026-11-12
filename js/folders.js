@@ -95,9 +95,9 @@ export const SEED_EXTRA_COURSES = [
   course("1MS014", "Tidsserieanalys", 10, "A1N", MS, [VT(4)], { folders: ["ovrig-matematik"],
     prereq: "120 hp inom teknik/naturvetenskap, Inferensteori I eller Sannolikhet och statistik, samt Engelska 6.",
     note: "Ges i period 4 i 67 % studietakt. Nivå (A1N) ej bekräftad mot kursplanen." }),
-  course("1TD186", "Finansiella beräkningsmetoder – prissättning och värdering", 5, "A1N", ["Datavetenskap", "Teknik", "Tillämpad beräkningsvetenskap"], [HT(1)], { folders: ["ovrig-matematik"],
+  course("1TD186", "Finansiella beräkningsmetoder – prissättning och värdering", 5, "A1N", ["Matematik", "Datavetenskap", "Teknik", "Tillämpad beräkningsvetenskap"], [HT(1)], { folders: ["ovrig-matematik"],
     prereq: "120 hp inom teknik/naturvetenskap, Beräkningsvetenskap II eller Introduktion till beräkningsvetenskap, samt Engelska 6.",
-    note: "Ges av Institutionen för informationsteknologi. Nivå och huvudområden ej bekräftade mot kursplanen." }),
+    note: "Ges av Institutionen för informationsteknologi. Räknas som matematik i ES-studenters studieplaner. Nivå och övriga huvudområden ej bekräftade mot kursplanen." }),
   course("1MA079", "Examensarbete C i matematik", 15, "G2E", M, [], { folders: ["ovrig-matematik"], anyPeriod: true,
     prereq: "60 hp matematik inkl. Flervariabelanalys och Linjär algebra II samt 15 hp matematik på G2F-nivå. Obligatoriskt för kandidatexamen i matematik." }),
 ];
