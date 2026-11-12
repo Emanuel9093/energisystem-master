@@ -214,3 +214,21 @@ create trigger pool_courses_log after insert or update or delete on public.pool_
 drop trigger if exists pool_folders_log on public.pool_folders;
 create trigger pool_folders_log after insert or update or delete on public.pool_folders
   for each row execute function public.pool_log();
+
+-- ---------- Behörigheter för Data API ----------
+-- Projektet skapas med "Automatically expose new tables" avstängt, så vi ger exakt de
+-- rättigheter sidan behöver. Bara inloggade (authenticated) kommer åt något, och
+-- Row Level Security ovan avgör vilka rader. Utloggade (anon) kommer inte åt några tabeller.
+grant usage on schema public to anon, authenticated;
+
+revoke all on public.plans, public.pool_courses, public.pool_folders, public.grades, public.pool_history from anon, authenticated;
+grant select, insert, update, delete on public.plans to authenticated;
+grant select, insert, update, delete on public.pool_courses to authenticated;
+grant select, insert, update, delete on public.pool_folders to authenticated;
+grant select, insert, update, delete on public.grades to authenticated;
+-- pool_history: ingen åtkomst via API:t, bara via Supabase-panelen.
+
+-- Funktioner: bara de som sidan anropar får köras av inloggade.
+revoke execute on function public.pool_set_editor(), public.pool_log(), public.reject_disallowed_email() from public, anon, authenticated;
+grant execute on function public.email_allowed(text) to authenticated;
+grant execute on function public.classmate_plans() to authenticated;
