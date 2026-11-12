@@ -109,8 +109,10 @@ export function guideHTML() {
           <p>Kursväljaren visar de kurser som ges i perioden du klickade på, och de hamnar alltid i rätt perioder. Läser du en kurs på egen hand och tentar den i en annan period eller på sommaren kan du söka efter den, klicka på den och välja <em>Lägg till ändå</em>. Den får då ett varningstecken i planen. Har kursen bytt perioder kan du rätta det i Kurspoolen under <em>Ändra</em>.</p></details>
         <details><summary>Vad är kurspaketet i teknikbaserat entreprenörskap?</summary>
           <p>Ett 30 hp-paket hösten i årskurs 5 som söks i konkurrens. Det räknas till de 30 hp som får väljas fritt och kan inte kombineras med Stora sociotekniska system, Ingenjörsetik eller Miljörätt. Se mappen i Kurspoolen.</p></details>
-        <details><summary>Jag vill läsa vidare till en matematikexamen.</summary>
-          <p>Se mappen <em>Övrig matematik</em> i Kurspoolen. Där står vad som krävs för en kandidat- eller masterexamen i matematik och vilka kurser som brukar behövas.</p></details>
+        <details><summary>Hur gör jag med utbytesstudier?</summary>
+          <p>Kurser du läser på utbyte räknas bara in i examen om de har <strong>tillgodoräknats</strong>. Det gäller alltid, även om kursen liknar en kurs i studieplanen. Prata med studievägledningen innan du åker och ansök om tillgodoräknande när du är hemma igen.
+          I Kurspoolen finns mappen <em>Utbytesstudier</em> med kurser som andra ESare har läst utomlands. Där kan du också lägga till dina egna kurser så att andra ser dem.
+          Vill du inte dela kursen kan du lägga till den som en privat kurs längst ner i kursväljaren.</p></details>
         <details><summary>Stämmer kontrollen alltid?</summary>
           <p>Sidan följer studieplanen och utbildningsplanen från HT 2026, men det är ett hjälpmedel. Det är Examensenheten som avgör om du får ut din examen. Fråga studievägledningen om du är osäker.</p></details>
       </section>
