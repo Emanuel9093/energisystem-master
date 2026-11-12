@@ -3,6 +3,7 @@ import { evaluate, STATUSES } from "./rules.js";
 import { ALLOWED_EMAIL_DOMAINS } from "./config.js";
 import { pool, buildPool, courseById, coursesIn, courseData, offeringText } from "./pool.js";
 import * as store from "./store.js";
+import { guideHTML } from "./guide.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const app = $("#app");
@@ -180,15 +181,15 @@ function cellsOf(it) {
   return cells;
 }
 
-function occupied(y) {
+function occupied(y, ignoreId) {
   const map = new Map();
-  for (const it of yearItems(y)) for (const c of cellsOf(it)) map.set(c, it);
+  for (const it of yearItems(y)) if (it.id !== ignoreId) for (const c of cellsOf(it)) map.set(c, it);
   return map;
 }
 
-function placementError(y, period, row, span, thick) {
+function placementError(y, period, row, span, thick, ignoreId) {
   if (period + span - 1 > 4) return `Kursen går över ${span} perioder och får inte plats från period ${period}.`;
-  const occ = occupied(y);
+  const occ = occupied(y, ignoreId);
   const rows = thick ? [...Array(thickRowsOf(y)).keys()] : [row];
   for (const r of rows) for (let p = period; p < period + span; p++) {
     const other = occ.get(`${r}:${p}`);
@@ -211,6 +212,7 @@ function render() {
   if (state.view === "plan") renderPlan();
   else if (state.view === "pool") renderPool();
   else if (state.view === "grades") renderGrades();
+  else if (state.view === "guide") renderGuide();
   else renderMates();
 }
 
@@ -222,11 +224,38 @@ $("#tabs").addEventListener("click", (ev) => {
   render();
 });
 
+// ---------- Guide ----------
+
+function renderGuide() {
+  app.innerHTML = guideHTML();
+  app.onclick = (ev) => {
+    const a = ev.target.closest('a[href^="#g-"]');
+    if (!a) return;
+    ev.preventDefault();
+    document.querySelector(a.getAttribute("href"))?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+}
+
+function showGuide() {
+  state.view = "guide";
+  sessionSet("es-view", "guide");
+  render();
+  scrollTo(0, 0);
+}
+
+const guideSeen = () => { try { return localStorage.getItem("es-guide-seen") === "1"; } catch { return true; } };
+const markGuideSeen = () => { try { localStorage.setItem("es-guide-seen", "1"); } catch { /* ignorera */ } };
+
 // ---------- Min plan ----------
 
 function renderPlan() {
   const y = state.year;
   app.innerHTML = `
+    ${guideSeen() ? "" : `
+      <div class="welcome card">
+        <div><strong>Ny här?</strong> Läs guiden om vad som krävs för examen och hur sidan fungerar. Det tar fem minuter.</div>
+        <div class="toolbar"><button class="btn small primary" id="open-guide">Läs guiden</button><button class="btn small ghost" id="hide-welcome">Dölj</button></div>
+      </div>`}
     <div class="plan-layout">
       <div class="stack">
         <div class="card profile">
@@ -316,6 +345,8 @@ function bindPlan() {
 
   app.onclick = (ev) => {
     const t = ev.target;
+    if (t.closest("#open-guide")) { markGuideSeen(); return showGuide(); }
+    if (t.closest("#hide-welcome")) { markGuideSeen(); return renderPlan(); }
     const yb = t.closest("[data-year]");
     if (yb) { state.year = Number(yb.dataset.year); sessionSet("es-year", state.year); return renderPlan(); }
 
@@ -419,24 +450,44 @@ function courseTags(c) {
     ${c.type === "ts" ? `<span class="tag ts">Teknik och system</span>` : ""}`;
 }
 
-function pickEntry(c, offering, ctx) {
+// Var kursen hamnar om man klickar på (år, period, rad). Kursen läggs alltid i de
+// perioder den faktiskt ges; klickar man i period 2 på en P1–2-kurs hamnar den i P1–2.
+// Är raden upptagen används första lediga rad.
+function slotFor(c, ctx, ignoreId) {
+  const o = c.offerings.find((x) => x.periods.includes(ctx.period));
+  let start, span;
+  if (o) { start = o.periods[0]; span = o.periods.length; }
+  else if (c.anyPeriod || c.summer) { start = ctx.period; span = 1; }
+  else return { err: `Ges inte i period ${ctx.period} (ges ${offeringText(c).join(", ")}).` };
+  if (c.thick) return { start, span, row: 0, err: placementError(ctx.year, start, 0, span, true, ignoreId) };
+  const rows = [ctx.row, ...[...Array(rowsOf(ctx.year)).keys()].filter((r) => r !== ctx.row)];
+  const row = rows.find((r) => !placementError(ctx.year, start, r, span, false, ignoreId));
+  if (row === undefined) return { err: placementError(ctx.year, start, ctx.row, span, false, ignoreId) + " Lägg till en rad eller ta bort en kurs." };
+  return { start, span, row, err: null };
+}
+
+// Kurs i samma "en av"-grupp (t.ex. examensarbete UU/SLU) som redan finns i planen.
+const groupItem = (c) => c.oneOf && state.plan.items.find((it) => it.code !== c.id && courseById(it.code)?.oneOf === c.oneOf);
+
+function pickEntry(c, ctx) {
   const placed = placedWhere(c.id);
-  const groupTaken = c.oneOf && state.plan.items.find((it) => courseById(it.code)?.oneOf === c.oneOf);
-  const span = offering?.periods?.length ?? 1;
-  const err = placed ? `Redan inlagd i år ${placed.year}` : groupTaken ? `Du har redan ${itemName(groupTaken)}` : placementError(ctx.year, ctx.period, ctx.row, span, !!c.thick);
+  const replaces = groupItem(c);
+  const slot = slotFor(c, ctx, replaces?.year === ctx.year ? replaces.id : undefined);
+  const err = placed ? `Redan inlagd i år ${placed.year}` : slot.err;
   const mates = matesFor(c.id).length;
+  const where = slot.err ? "" : `Hamnar i period ${slot.start}${slot.span > 1 ? "–" + (slot.start + slot.span - 1) : ""}`;
   return `
-    <button class="pick" data-pick="${esc(c.id)}" data-span="${span}" ${err ? "disabled" : ""}>
+    <button class="pick" data-pick="${esc(c.id)}" ${err ? "disabled" : ""}>
       <span class="pick-main">
         <span class="pick-name">${esc(c.name)}</span>
         <span class="course-meta">
           ${courseTags(c)}
-          <span>${offeringText(c).join(", ")}</span>
+          <span>Ges ${offeringText(c).join(", ")}</span>
           ${c.year ? `<span>Rek. år ${c.year}</span>` : ""}
           ${c.thick ? `<span class="tag">Tar alla tre rader</span>` : ""}
           ${mates ? `<span class="tag mates">${plural(mates, "klasskompis", "klasskompisar")}</span>` : ""}
         </span>
-        ${err ? `<span class="pick-err">${esc(err)}</span>` : ""}
+        ${err ? `<span class="pick-err">${esc(err)}</span>` : `<span class="pick-ok">${where}${replaces ? ` · ersätter ${esc(itemName(replaces))}` : ""}</span>`}
       </span>
     </button>`;
 }
@@ -444,25 +495,26 @@ function pickEntry(c, offering, ctx) {
 function renderPicker() {
   const ctx = state.picker;
   const q = state.pickerQuery.trim().toLowerCase();
-  const startsHere = (c) => c.offerings.find((o) => o.periods[0] === ctx.period);
+  const runsHere = (c) => c.offerings.some((o) => o.periods.includes(ctx.period));
   let sections;
 
   if (q) {
     const hits = pool.courses.filter((c) => c.name.toLowerCase().includes(q) || (c.code || "").toLowerCase().includes(q));
-    sections = [["Sökresultat", hits.map((c) => [c, startsHere(c) || c.offerings[0]])]];
+    const ok = hits.filter((c) => runsHere(c) || c.anyPeriod || c.summer);
+    sections = [["Sökresultat", ok], [`Ges inte i period ${ctx.period}`, hits.filter((c) => !ok.includes(c))]];
   } else {
     const shown = new Set();
-    const take = (list) => list.filter((x) => !shown.has(x[0].id) && shown.add(x[0].id));
-    const here = pool.courses.filter(startsHere).map((c) => [c, startsHere(c)]);
-    sections = [[`Rekommenderat år ${ctx.year}, period ${ctx.period}`, take(here.filter(([c]) => c.year === ctx.year))]];
-    for (const f of pool.folders) sections.push([`${f.name} – börjar i period ${ctx.period}`, take(here.filter(([c]) => c.folders.includes(f.id)))]);
-    sections.push(["Övriga kurser som börjar i perioden", take(here)]);
-    sections.push(["Valfri period och sommar", take(pool.courses.filter((c) => c.anyPeriod || c.summer).map((c) => [c, null]))]);
+    const take = (list) => list.filter((c) => !shown.has(c.id) && shown.add(c.id));
+    const here = pool.courses.filter(runsHere);
+    sections = [[`Rekommenderat år ${ctx.year}, ges i period ${ctx.period}`, take(here.filter((c) => c.year === ctx.year))]];
+    for (const f of pool.folders) sections.push([`${f.name} – ges i period ${ctx.period}`, take(here.filter((c) => c.folders.includes(f.id)))]);
+    sections.push([`Övriga kurser i period ${ctx.period}`, take(here)]);
+    sections.push(["Valfri period och sommar", take(pool.courses.filter((c) => c.anyPeriod || c.summer))]);
   }
 
   const body = sections
     .filter(([, list]) => list.length)
-    .map(([title, list]) => `<h3 class="pick-h">${esc(title)}</h3>${list.map(([c, o]) => pickEntry(c, o, ctx)).join("")}`)
+    .map(([title, list]) => `<h3 class="pick-h">${esc(title)}</h3>${list.map((c) => pickEntry(c, ctx)).join("")}`)
     .join("") || `<p class="muted">Inga kurser matchar.</p>`;
 
   dlg.innerHTML = `
@@ -525,8 +577,12 @@ dlg.addEventListener("click", (ev) => {
   const pick = ev.target.closest("[data-pick]");
   if (pick && !pick.disabled && state.picker) {
     const c = courseById(pick.dataset.pick);
-    const { year, period, row } = state.picker;
-    addItem(year, period, row, { code: c.id, span: Number(pick.dataset.span), thick: !!c.thick });
+    const ctx = state.picker;
+    const replaces = groupItem(c);
+    const slot = slotFor(c, ctx, replaces?.year === ctx.year ? replaces.id : undefined);
+    if (slot.err) { alert(slot.err); return; }
+    if (replaces) state.plan.items = state.plan.items.filter((x) => x !== replaces);
+    addItem(ctx.year, slot.start, slot.row, { code: c.id, span: slot.span, thick: !!c.thick });
     dlg.close();
     renderPlan();
     return;
@@ -535,6 +591,14 @@ dlg.addEventListener("click", (ev) => {
   if (st) {
     const it = state.plan.items.find((x) => x.id === st.dataset.id);
     it.status = st.dataset.setStatus;
+    changed();
+    renderPlan();
+    return openItem(it.id);
+  }
+  const sw = ev.target.closest("[data-swap]");
+  if (sw) {
+    const it = state.plan.items.find((x) => x.id === sw.dataset.id);
+    it.code = sw.dataset.swap;
     changed();
     renderPlan();
     return openItem(it.id);
@@ -585,6 +649,9 @@ function openItem(id) {
     </div>
     ${c ? `<h3 class="pick-h">Klasskompisar som läser kursen</h3>
       ${mates.length ? `<div class="people">${mates.map(({ m, it: mi }) => personChip(m, mi.status)).join("")}</div>` : `<p class="muted small">Ingen ännu.</p>`}` : ""}
+    ${c?.oneOf ? pool.courses.filter((x) => x.oneOf === c.oneOf && x.id !== c.id).map((alt) => `
+      <h3 class="pick-h">Byt variant</h3>
+      <button class="btn small" data-swap="${esc(alt.id)}" data-id="${esc(it.id)}">Byt till ${esc(alt.name)} (${esc(alt.code)})</button>`).join("") : ""}
     <div class="dlg-foot">
       <button class="btn danger" data-remove="${esc(it.id)}">Ta bort från planen</button>
       <button class="btn" data-close>Klar</button>

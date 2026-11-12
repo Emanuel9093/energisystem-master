@@ -421,3 +421,50 @@ legend { font-size: 13px; font-weight: 700; color: var(--accent); padding: 0 4px
 .grade-row:first-of-type { border-top: 0; }
 .grade-seg button { min-width: 40px; padding: 6px 10px; }
 @media (max-width: 520px) { .grade-row { flex-direction: column; align-items: flex-start; } }
+.pick-ok { color: var(--accent); font-size: 12.5px; font-weight: 600; }
+
+/* Välkomstruta och guide */
+.welcome { display: flex; gap: 12px 20px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 16px; background: var(--accent-soft); border-color: var(--es-teal); }
+.guide { display: flex; flex-direction: column; gap: 16px; max-width: 980px; margin: 0 auto; }
+.guide section { scroll-margin-top: 90px; padding: 20px 22px; }
+.guide h2 { font-size: 21px; color: var(--accent); }
+.guide h3 { margin: 18px 0 8px; }
+.guide p, .guide li { max-width: 78ch; }
+.guide-hero { display: flex; gap: 20px; align-items: center; padding: 22px; }
+.guide-hero h1 { margin-bottom: 6px; }
+.guide-hero p { margin: 0 0 12px; }
+@media (max-width: 640px) { .guide-hero { flex-direction: column; align-items: flex-start; } .guide-hero img { width: 90px; } }
+.guide-toc { display: flex; flex-wrap: wrap; gap: 8px; }
+.guide-toc a { text-decoration: none; font-weight: 700; font-size: 13.5px; padding: 5px 12px; border-radius: 999px; background: var(--accent-soft); }
+.guide-toc a:hover { background: var(--es-teal); color: #fff; }
+
+.hp-bar { display: flex; height: 64px; border-radius: 12px; overflow: hidden; margin: 14px 0 10px; gap: 2px; }
+.hp-bar > div { display: flex; flex-direction: column; justify-content: center; padding: 0 10px; min-width: 0; color: #fff; }
+.hp-bar strong { font-size: 15px; white-space: nowrap; }
+.hp-bar span { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0.92; }
+.p-obl { background: #818486; }
+.p-ts { background: #1d9e9b; }
+.p-ex { background: #0b4f4d; }
+.p-val { background: #127572; }
+.p-free { background: #a8b0b2; }
+.p-free, .p-free * { color: #1c1f20 !important; }
+.hp-legend { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 16px; font-size: 13.5px; }
+.hp-legend > div { display: flex; gap: 8px; align-items: flex-start; }
+.hp-legend i { width: 14px; height: 14px; border-radius: 4px; flex: none; margin-top: 3px; }
+.hp-legend small { color: var(--muted); }
+@media (max-width: 640px) { .hp-bar span { display: none; } .hp-bar > div { padding: 0 4px; align-items: center; } .hp-bar strong { font-size: 12px; } }
+
+.req-list, .steps { padding-left: 22px; display: flex; flex-direction: column; gap: 8px; }
+.tips { padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+.chip { display: inline-block; font-size: 12.5px; font-weight: 700; padding: 1px 10px; border-radius: 999px; }
+.chip.planned { border: 2px dashed var(--es-teal); color: var(--pill-planned-text); }
+.chip.ongoing { background: var(--pill-ongoing); color: var(--pill-ongoing-text); border: 2px solid var(--es-teal); }
+.chip.done { background: var(--pill-done); color: #fff; border: 2px solid var(--pill-done); }
+.tab-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+.tab-cards > div { background: var(--surface-2); border-radius: 12px; padding: 12px 14px; }
+.tab-cards h3 { margin: 0 0 4px; color: var(--accent); }
+.tab-cards p { margin: 0; font-size: 14px; }
+.guide details { border-top: 1px solid var(--line); padding: 10px 0; }
+.guide details:first-of-type { border-top: 0; }
+.guide summary { cursor: pointer; font-weight: 700; }
+.guide details p { margin: 8px 0 0; }

@@ -16,6 +16,7 @@ En webbsida för oss på Civilingenjörsprogrammet i energisystem (TES2Y, UU/SLU
   - varningar för kurspar som inte får räknas tillsammans och för mer än 30 hp utanför studieplanen
 - **Klasskompisar**: se vilka valbara kurser andra läser eller planerar, per kurs eller per person.
 - **Kurspoolen**: alla kurser med behörighet, huvudområden och när de ges (HT/VT, period). Kurserna ligger i mappar: *Programplanen*, *Teknikbaserat entreprenörskap* och *Övrig matematik*. Alla kan skapa nya mappar, lägga till kurser, ändra kurser (t.ex. att en kurs ges både HT och VT) och flytta kurser mellan mappar. Ändringar i studieplanens kurser kan återställas. Kursväljaren i Min plan hämtar kurserna härifrån.
+- **Guide**: förklarar examenskraven och hur sidan används. Nya användare får en ruta under Min plan som länkar till guiden.
 - **Mina betyg**: fyll i betyg (3/4/5/G/VG) för kurser som är klara. Viktat och oviktat snitt räknas ut automatiskt. Betygen sparas privat och visas aldrig för klasskompisar.
 
 År 1–3 fylls i automatiskt med de obligatoriska kurserna (markerade som klara) när någon skapar sin plan. De går att ta bort om man har tillgodoräknat något annat.
