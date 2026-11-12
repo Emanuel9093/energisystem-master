@@ -621,3 +621,8 @@ button.person:hover { background: var(--accent-soft); outline: 1px solid var(--e
 .req-tools select { flex: 1 1 160px; font-size: 13px; padding: 5px 8px; }
 .req-tools .icon-btn { margin-left: auto; }
 .req-edit > select { width: 100%; }
+
+/* Inloggning */
+.login-links { display: flex; justify-content: space-between; gap: 12px; margin-top: 14px; flex-wrap: wrap; }
+.linkish { border: 0; background: none; padding: 0; font: inherit; font-size: 14px; color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.login .check { font-size: 14px; }

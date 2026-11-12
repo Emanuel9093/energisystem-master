@@ -7,7 +7,3 @@
 
 export const SUPABASE_URL = "";
 export const SUPABASE_ANON_KEY = "";
-
-// Bara e-postadresser som slutar på någon av dessa domäner kan logga in.
-// Samma lista finns i supabase/schema.sql och måste hållas i synk.
-export const ALLOWED_EMAIL_DOMAINS = ["student.uu.se", "stud.slu.se"];

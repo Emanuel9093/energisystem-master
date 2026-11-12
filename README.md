@@ -42,7 +42,9 @@ python -m http.server 5173
 3. Under **Authentication → URL Configuration**: sätt *Site URL* till sidans adress, t.ex. `https://<användarnamn>.github.io/energisystem-master/`.
 4. Under **Project Settings → API**: kopiera *Project URL* och nyckeln *anon public* till `js/config.js`.
 
-Inloggning sker med en länk som mejlas till studentadressen (`@student.uu.se` eller `@stud.slu.se`). Vill du ändra vilka adresser som släpps in ändrar du både `ALLOWED_EMAIL_DOMAINS` i `js/config.js` och funktionen `email_allowed` i `schema.sql`.
+Inloggning sker med valfri e-post och lösenord. Nya konton bekräftar sin adress via mejl, och glömda lösenord återställs via en mejllänk. *Kom ihåg mig* sparar inloggningen i webbläsaren; annars gäller den tills fliken stängs.
+
+I Supabase: **Authentication → Sign In / Providers → Email** ska vara på, med *Confirm email* påslaget. Sätt minsta lösenordslängd till 8 under **Authentication → Policies** (eller motsvarande). Lägg `http://localhost:5173/` och sidans riktiga adress under *Redirect URLs* så att bekräftelse- och återställningslänkarna fungerar.
 
 Varje student kan bara ändra sin egen plan. Andra ESares planer hämtas via databasfunktionen `classmate_plans()`. Den tar bort avklarade kurser för den som bockat i "Dölj mina avklarade kurser för andra ESare", så de lämnar aldrig databasen. Pågående och planerade kurser syns alltid.
 

@@ -55,18 +55,52 @@ const normalize = (p) => {
 
 let sb = null;
 
+// "Kom ihåg mig": inloggningen sparas i localStorage (finns kvar när webbläsaren stängs)
+// eller i sessionStorage (försvinner när fliken stängs).
+const REMEMBER_KEY = "es-remember";
+const remembers = () => { try { return localStorage.getItem(REMEMBER_KEY) !== "0"; } catch { return true; } };
+const authStorage = {
+  getItem: (k) => { try { return localStorage.getItem(k) ?? sessionStorage.getItem(k); } catch { return null; } },
+  setItem: (k, v) => {
+    try {
+      const keep = remembers();
+      (keep ? localStorage : sessionStorage).setItem(k, v);
+      (keep ? sessionStorage : localStorage).removeItem(k);
+    } catch { /* ignorera */ }
+  },
+  removeItem: (k) => { try { localStorage.removeItem(k); sessionStorage.removeItem(k); } catch { /* ignorera */ } },
+};
+
+// Kom användaren hit via en länk för att återställa lösenordet? (läses innan klienten tolkar adressen)
+export const RECOVERY_LINK = /type=recovery/.test(location.hash);
+
 async function client() {
   if (!sb) {
     const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm");
-    sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { storage: authStorage, persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
   }
   return sb;
 }
 
 // ---------- Inloggning ----------
 
+const siteUrl = () => location.origin + location.pathname;
+
+// Supabases felmeddelanden på svenska
+function authError(error) {
+  const m = String(error?.message || error || "");
+  if (/failed to fetch|network|load failed/i.test(m)) return new Error("Kunde inte nå servern. Kontrollera internetanslutningen och försök igen.");
+  if (/invalid login credentials/i.test(m)) return new Error("Fel e-post eller lösenord.");
+  if (/email not confirmed/i.test(m)) return new Error("Du behöver bekräfta din e-post först. Klicka på länken i mejlet vi skickade.");
+  if (/already registered|already exists/i.test(m)) return new Error("Det finns redan ett konto med den e-posten. Logga in eller återställ lösenordet.");
+  if (/rate limit|too many/i.test(m)) return new Error("För många försök. Vänta en stund och försök igen.");
+  if (/password should be|weak password|at least/i.test(m)) return new Error("Lösenordet är för svagt. Använd minst 8 tecken.");
+  if (/same password|different from the old/i.test(m)) return new Error("Det nya lösenordet måste skilja sig från det gamla.");
+  return new Error(m || "Något gick fel.");
+}
+
 export async function getUser() {
-  if (DEMO) return { id: "demo", email: "demo@student.uu.se" };
+  if (DEMO) return { id: "demo", email: "demo@example.com" };
   const { data } = await (await client()).auth.getSession();
   return data.session?.user ?? null;
 }
@@ -74,13 +108,31 @@ export async function getUser() {
 export async function onAuthChange(cb) {
   if (DEMO) return;
   // setTimeout: Supabase-anrop direkt i callbacken kan låsa sig (supabase-js v2)
-  (await client()).auth.onAuthStateChange((_event, session) => setTimeout(() => cb(session?.user ?? null), 0));
+  (await client()).auth.onAuthStateChange((event, session) => setTimeout(() => cb(session?.user ?? null, event), 0));
 }
 
-export async function sendLoginLink(email) {
-  const redirect = location.origin + location.pathname;
-  const { error } = await (await client()).auth.signInWithOtp({ email, options: { emailRedirectTo: redirect } });
-  if (error) throw error;
+export async function signIn(email, password, remember) {
+  try { localStorage.setItem(REMEMBER_KEY, remember ? "1" : "0"); } catch { /* ignorera */ }
+  const { error } = await (await client()).auth.signInWithPassword({ email, password });
+  if (error) throw authError(error);
+}
+
+// Returnerar true om kontot kan användas direkt, false om e-posten först måste bekräftas.
+export async function signUp(email, password, remember) {
+  try { localStorage.setItem(REMEMBER_KEY, remember ? "1" : "0"); } catch { /* ignorera */ }
+  const { data, error } = await (await client()).auth.signUp({ email, password, options: { emailRedirectTo: siteUrl() } });
+  if (error) throw authError(error);
+  return !!data.session;
+}
+
+export async function sendPasswordReset(email) {
+  const { error } = await (await client()).auth.resetPasswordForEmail(email, { redirectTo: siteUrl() });
+  if (error) throw authError(error);
+}
+
+export async function updatePassword(password) {
+  const { error } = await (await client()).auth.updateUser({ password });
+  if (error) throw authError(error);
 }
 
 export async function signOut() {

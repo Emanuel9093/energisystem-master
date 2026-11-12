@@ -59,7 +59,7 @@ export function guideHTML() {
       <section class="card" id="g-start">
         <h2>Kom igång</h2>
         <ol class="steps">
-          <li><strong>Logga in</strong> med din studentadress. Du får en inloggningslänk på mejlen, inget lösenord behövs.</li>
+          <li><strong>Skapa ett konto</strong> med valfri e-postadress och ett lösenord, och bekräfta adressen via mejlet du får. Bocka i <em>Kom ihåg mig</em> så slipper du logga in varje gång. Har du glömt lösenordet kan du återställa det via mejlen.</li>
           <li><strong>Skriv ditt namn</strong> högst upp under Min plan, så att andra ESare ser vem du är.</li>
           <li><strong>Kolla år 1–3.</strong> De obligatoriska kurserna är redan ifyllda och markerade som klara. Har du tillgodoräknat något annat
           klickar du på kursen och väljer <em>Ta bort från planen</em> och lägger in det du har läst i stället.</li>

@@ -1,6 +1,5 @@
 import { LEVELS, KNOWN_AREAS } from "./courses.js";
 import { evaluate, STATUSES } from "./rules.js";
-import { ALLOWED_EMAIL_DOMAINS } from "./config.js";
 import { pool, buildPool, courseById, coursesIn, courseData, offeringText, safeUrl, HP_KEYS, cleanReq } from "./pool.js";
 import * as store from "./store.js";
 import { guideHTML } from "./guide.js";
@@ -62,7 +61,10 @@ async function start() {
   } catch (e) {
     return showError(e);
   }
-  await store.onAuthChange(async (user) => {
+  // Länk för att återställa lösenordet: visa "välj nytt lösenord" innan något annat.
+  state.recovery = store.RECOVERY_LINK && !!state.user;
+  await store.onAuthChange(async (user, event) => {
+    if (event === "PASSWORD_RECOVERY") { state.user = user; state.recovery = true; renderUser(); $("#tabs").hidden = true; return renderLogin("reset"); }
     const changed = (user?.id || null) !== (state.user?.id || null);
     state.user = user;
     if (changed) await afterLogin();
@@ -72,9 +74,9 @@ async function start() {
 
 async function afterLogin() {
   renderUser();
-  if (!state.user) {
+  if (!state.user || state.recovery) {
     $("#tabs").hidden = true;
-    return renderLogin();
+    return renderLogin(state.recovery ? "reset" : "login");
   }
   $("#tabs").hidden = false;
   try {
@@ -106,32 +108,72 @@ function renderUser() {
   $("#logout").onclick = async () => { await flushSaves(); await store.signOut(); state.user = null; afterLogin(); };
 }
 
-function renderLogin(message = "") {
+// Inloggning med e-post och lösenord. Lägen: login, signup, forgot, reset (nytt lösenord från mejllänk).
+function renderLogin(mode = "login", message = "", email = "") {
+  const msg = message ? `<div class="msg ${message.startsWith("!") ? "err" : "ok"}">${esc(message.replace(/^!/, ""))}</div>` : "";
+  const remember = (() => { try { return localStorage.getItem("es-remember") !== "0"; } catch { return true; } })();
+  const T = {
+    login: ["Logga in", "Logga in med din e-post och ditt lösenord.", "Logga in"],
+    signup: ["Skapa konto", "Du kan använda vilken e-postadress som helst. Vi skickar ett mejl så att du kan bekräfta adressen.", "Skapa konto"],
+    forgot: ["Glömt lösenordet?", "Ange din e-post så skickar vi en länk där du kan välja ett nytt lösenord.", "Skicka länk"],
+    reset: ["Välj nytt lösenord", "Skriv ditt nya lösenord två gånger.", "Spara lösenord"],
+  }[mode];
+  const pw = (name, label, auto) => `<label class="field">${label}<input type="password" name="${name}" required minlength="8" autocomplete="${auto}"></label>`;
   app.innerHTML = `
     <div class="card login">
       <img src="assets/es-logo.png" alt="" class="login-logo">
-      <h1>Logga in</h1>
-      <p class="muted">Ange din studentadress så skickar vi en inloggningslänk. Du behöver inget lösenord.</p>
-      <form id="login-form">
-        <label class="field">E-post
-          <input type="email" name="email" required autocomplete="email" placeholder="fornamn.efternamn.1234@student.uu.se">
-        </label>
-        <button class="btn primary" type="submit">Skicka inloggningslänk</button>
-        ${message}
+      <h1>${T[0]}</h1>
+      <p class="muted">${T[1]}</p>
+      <form id="login-form" novalidate>
+        ${mode !== "reset" ? `<label class="field">E-post<input type="email" name="email" required autocomplete="email" value="${esc(email)}"></label>` : ""}
+        ${mode === "login" ? pw("password", "Lösenord", "current-password") : ""}
+        ${mode === "signup" || mode === "reset" ? pw("password", mode === "reset" ? "Nytt lösenord (minst 8 tecken)" : "Lösenord (minst 8 tecken)", "new-password") + pw("password2", "Upprepa lösenordet", "new-password") : ""}
+        ${mode === "login" || mode === "signup" ? `<label class="check"><input type="checkbox" name="remember" ${remember ? "checked" : ""}> Kom ihåg mig på den här enheten</label>` : ""}
+        ${msg}
+        <button class="btn primary" type="submit">${T[2]}</button>
       </form>
+      <div class="login-links">
+        ${mode === "login" ? `<button class="linkish" data-mode="forgot">Glömt lösenordet?</button><button class="linkish" data-mode="signup">Skapa konto</button>` : ""}
+        ${mode === "signup" || mode === "forgot" ? `<button class="linkish" data-mode="login">Tillbaka till inloggningen</button>` : ""}
+      </div>
     </div>`;
-  $("#login-form").onsubmit = async (ev) => {
+
+  app.onclick = (ev) => {
+    const b = ev.target.closest("[data-mode]");
+    if (b) renderLogin(b.dataset.mode, "", $('#login-form [name="email"]')?.value || "");
+  };
+  const form = $("#login-form");
+  form.onsubmit = async (ev) => {
     ev.preventDefault();
-    const email = new FormData(ev.target).get("email").trim().toLowerCase();
-    const domain = email.split("@")[1] || "";
-    if (!ALLOWED_EMAIL_DOMAINS.includes(domain)) {
-      return renderLogin(`<div class="msg err">Använd din studentadress (${ALLOWED_EMAIL_DOMAINS.map((d) => "@" + d).join(" eller ")}).</div>`);
-    }
+    const fd = new FormData(form);
+    const em = String(fd.get("email") || "").trim().toLowerCase();
+    const p1 = String(fd.get("password") || "");
+    const p2 = String(fd.get("password2") || "");
+    const keep = fd.get("remember") === "on";
+    const fail = (m) => renderLogin(mode, "!" + m, em);
+    if (mode !== "reset" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) return fail("Skriv en giltig e-postadress.");
+    if ((mode === "signup" || mode === "reset") && p1.length < 8) return fail("Lösenordet måste vara minst 8 tecken.");
+    if ((mode === "signup" || mode === "reset") && p1 !== p2) return fail("Lösenorden är inte likadana.");
+    if (mode === "login" && !p1) return fail("Skriv ditt lösenord.");
+    const btn = form.querySelector('[type="submit"]');
+    btn.disabled = true;
     try {
-      await store.sendLoginLink(email);
-      renderLogin(`<div class="msg ok">Kolla din mejl! Klicka på länken för att logga in.</div>`);
+      if (mode === "login") {
+        await store.signIn(em, p1, keep);
+      } else if (mode === "signup") {
+        const ready = await store.signUp(em, p1, keep);
+        if (!ready) renderLogin("login", "Kolla din mejl och klicka på länken för att bekräfta adressen. Sedan kan du logga in.", em);
+      } else if (mode === "forgot") {
+        await store.sendPasswordReset(em);
+        renderLogin("login", "Om det finns ett konto med den adressen har vi skickat en länk för att välja nytt lösenord.", em);
+      } else if (mode === "reset") {
+        await store.updatePassword(p1);
+        state.recovery = false;
+        history.replaceState(null, "", location.pathname);
+        await afterLogin();
+      }
     } catch (e) {
-      renderLogin(`<div class="msg err">${esc(e.message)}</div>`);
+      fail(e.message);
     }
   };
 }

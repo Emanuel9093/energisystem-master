@@ -1,34 +1,10 @@
 -- Kör hela filen i Supabase: SQL Editor → New query → klistra in → Run.
--- Domänlistan nedan måste stämma med ALLOWED_EMAIL_DOMAINS i js/config.js.
+-- Vem som helst kan skapa ett konto med e-post och lösenord. Allt nedan kräver inloggning
+-- (rollen authenticated); Row Level Security avgör sedan vilka rader man kommer åt.
 
--- Vilka e-postdomäner som får använda sidan
-create or replace function public.email_allowed(email text)
-returns boolean
-language sql
-immutable
-as $$
-  select lower(coalesce(email, '')) ~ '@(student\.uu\.se|stud\.slu\.se)$'
-$$;
-
--- Stoppa konton med andra e-postadresser redan när de skapas
-create or replace function public.reject_disallowed_email()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  if not public.email_allowed(new.email) then
-    raise exception 'Använd din studentadress (@student.uu.se eller @stud.slu.se).';
-  end if;
-  return new;
-end;
-$$;
-
+-- Äldre version släppte bara in studentmejl. Ta bort den spärren om den finns.
 drop trigger if exists check_email_domain on auth.users;
-create trigger check_email_domain
-  before insert on auth.users
-  for each row execute function public.reject_disallowed_email();
+drop function if exists public.reject_disallowed_email();
 
 -- En rad per student med namn och kursplan
 create table if not exists public.plans (
@@ -68,7 +44,7 @@ as $$
     else p.plan end,
     p.updated_at
   from public.plans p
-  where public.email_allowed(auth.jwt() ->> 'email')
+  where auth.uid() is not null
     and p.user_id <> auth.uid()
     and p.name <> ''
 $$;
@@ -79,7 +55,7 @@ grant execute on function public.classmate_plans() to authenticated;
 drop policy if exists "Skapa egen plan" on public.plans;
 create policy "Skapa egen plan" on public.plans
   for insert to authenticated
-  with check (user_id = auth.uid() and public.email_allowed(auth.jwt() ->> 'email'));
+  with check (user_id = auth.uid() and auth.uid() is not null);
 
 drop policy if exists "Ändra egen plan" on public.plans;
 create policy "Ändra egen plan" on public.plans
@@ -120,13 +96,13 @@ declare t text;
 begin
   foreach t in array array['pool_courses', 'pool_folders'] loop
     execute format('drop policy if exists "Läs kurspoolen" on public.%I', t);
-    execute format('create policy "Läs kurspoolen" on public.%I for select to authenticated using (public.email_allowed(auth.jwt() ->> ''email''))', t);
+    execute format('create policy "Läs kurspoolen" on public.%I for select to authenticated using (auth.uid() is not null)', t);
     execute format('drop policy if exists "Lägg till i kurspoolen" on public.%I', t);
-    execute format('create policy "Lägg till i kurspoolen" on public.%I for insert to authenticated with check (public.email_allowed(auth.jwt() ->> ''email''))', t);
+    execute format('create policy "Lägg till i kurspoolen" on public.%I for insert to authenticated with check (auth.uid() is not null)', t);
     execute format('drop policy if exists "Ändra i kurspoolen" on public.%I', t);
-    execute format('create policy "Ändra i kurspoolen" on public.%I for update to authenticated using (public.email_allowed(auth.jwt() ->> ''email'')) with check (public.email_allowed(auth.jwt() ->> ''email''))', t);
+    execute format('create policy "Ändra i kurspoolen" on public.%I for update to authenticated using (auth.uid() is not null) with check (auth.uid() is not null)', t);
     execute format('drop policy if exists "Ta bort ur kurspoolen" on public.%I', t);
-    execute format('create policy "Ta bort ur kurspoolen" on public.%I for delete to authenticated using (public.email_allowed(auth.jwt() ->> ''email''))', t);
+    execute format('create policy "Ta bort ur kurspoolen" on public.%I for delete to authenticated using (auth.uid() is not null)', t);
   end loop;
 end $$;
 
@@ -229,6 +205,8 @@ grant select, insert, update, delete on public.grades to authenticated;
 -- pool_history: ingen åtkomst via API:t, bara via Supabase-panelen.
 
 -- Funktioner: bara de som sidan anropar får köras av inloggade.
-revoke execute on function public.pool_set_editor(), public.pool_log(), public.reject_disallowed_email() from public, anon, authenticated;
-grant execute on function public.email_allowed(text) to authenticated;
+revoke execute on function public.pool_set_editor(), public.pool_log() from public, anon, authenticated;
 grant execute on function public.classmate_plans() to authenticated;
+
+-- Rester från versionen med studentmejl (körs sist, när inga policyer använder funktionen längre)
+drop function if exists public.email_allowed(text);
