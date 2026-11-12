@@ -5,7 +5,9 @@ import { BY_CODE, offeringsOf } from "./courses.js";
 
 export const DEMO = !SUPABASE_URL || !SUPABASE_ANON_KEY;
 
-export const emptyPlan = () => ({ name: "", start_year: null, visible: true, rows: { 1: 3, 2: 3, 3: 3, 4: 3, 5: 3 }, items: [] });
+// summers: år (1–4) som följs av en sommar med sommarkurser.
+// hide_done: avklarade kurser syns inte för klasskompisar (pågående och planerade syns alltid).
+export const emptyPlan = () => ({ name: "", start_year: null, hide_done: false, rows: { 1: 3, 2: 3, 3: 3, 4: 3, 5: 3 }, summers: [], items: [] });
 
 const STATUS_OK = new Set(["planned", "ongoing", "done"]);
 const int = (v, lo, hi, d) => { const n = Number(v); return Number.isInteger(n) && n >= lo && n <= hi ? n : d; };
@@ -22,6 +24,8 @@ function cleanItem(it) {
     status: STATUS_OK.has(it.status) ? it.status : "planned",
   };
   if (out.period + out.span - 1 > 4) out.span = 5 - out.period;
+  // Sommarkurs: sommaren efter år `year`, en enda period, `row` är ordningen i listan.
+  if (it.summer) Object.assign(out, { summer: true, year: int(it.year, 1, 4, 1), period: 1, span: 1, thick: false, row: int(it.row, 0, 99, 0) });
   if (it.code) out.code = txt(it.code, 40);
   if (it.custom && typeof it.custom === "object") {
     const c = it.custom;
@@ -36,10 +40,13 @@ function cleanItem(it) {
 const normalize = (p) => {
   const rows = { ...emptyPlan().rows };
   for (const y of [1, 2, 3, 4, 5]) rows[y] = int(p.rows?.[y], 1, 6, 3);
+  const items = (Array.isArray(p.items) ? p.items : []).map(cleanItem).filter(Boolean);
+  const summers = new Set((Array.isArray(p.summers) ? p.summers : []).map((y) => int(y, 1, 4, 0)).filter(Boolean));
+  for (const it of items) if (it.summer) summers.add(it.year);
   return {
     ...emptyPlan(), ...p,
-    name: txt(p.name, 80), start_year: int(p.start_year, 2010, 2040, null), visible: p.visible !== false,
-    rows, items: (Array.isArray(p.items) ? p.items : []).map(cleanItem).filter(Boolean),
+    name: txt(p.name, 80), start_year: int(p.start_year, 2010, 2040, null), hide_done: !!p.hide_done,
+    rows, summers: [...summers].sort(), items,
   };
 };
 
@@ -81,8 +88,8 @@ export async function signOut() {
 // ---------- Planer ----------
 
 const fromRow = (r) => normalize({
-  user_id: r.user_id, name: r.name, start_year: r.start_year, visible: r.visible,
-  rows: r.plan?.rows, items: r.plan?.items, updated_at: r.updated_at,
+  user_id: r.user_id, name: r.name, start_year: r.start_year, hide_done: r.hide_done,
+  rows: r.plan?.rows, summers: r.plan?.summers, items: r.plan?.items, updated_at: r.updated_at,
 });
 
 export async function loadMyPlan(user) {
@@ -107,8 +114,8 @@ export async function saveMyPlan(user, plan) {
     user_id: user.id,
     name: plan.name.trim(),
     start_year: plan.start_year || null,
-    visible: plan.visible,
-    plan: { rows: plan.rows, items: plan.items },
+    hide_done: !!plan.hide_done,
+    plan: { rows: plan.rows, summers: plan.summers, items: plan.items },
     updated_at: new Date().toISOString(),
   };
   const { error } = await (await client()).from("plans").upsert(row);
@@ -116,11 +123,11 @@ export async function saveMyPlan(user, plan) {
 }
 
 export async function loadClassmates(user) {
-  if (DEMO) return DEMO_CLASSMATES;
-  const { data, error } = await (await client())
-    .from("plans").select("*").eq("visible", true).neq("user_id", user.id).order("name");
+  // Databasfunktionen tar själv bort avklarade kurser för den som valt att dölja dem.
+  if (DEMO) return DEMO_CLASSMATES.map((p) => (p.hide_done ? { ...p, items: p.items.filter((it) => it.status !== "done") } : p));
+  const { data, error } = await (await client()).rpc("classmate_plans");
   if (error) throw error;
-  return data.map(fromRow).filter((p) => p.name);
+  return data.map(fromRow).filter((p) => p.name).sort((a, b) => a.name.localeCompare(b.name, "sv"));
 }
 
 // ---------- Kurspoolen (delad mellan alla) ----------
@@ -190,6 +197,6 @@ const DEMO_CLASSMATES = [
   { name: "Alva Lindqvist", start_year: 2022, items: demoItems([["1TE029", "done"], ["1TE038", "done"], ["1TE028", "ongoing"], ["TN0347", "ongoing"], ["1KB274", "ongoing"], ["1FA392", "planned"]]) },
   { name: "Omar Haddad", start_year: 2022, items: [...demoItems([["1FA410", "done"], ["1TS309", "done"], ["1TE700", "ongoing"], ["1FA412", "done"], ["1FA594", "planned"], ["1FA392", "planned"]]), { id: "x1", year: 4, period: 1, row: 1, span: 2, status: "done", custom: { code: "", name: "Utbytesstudier DTU, Energy Systems", hp: 15, level: "A1N", teknik: true } }] },
   { name: "Elin Sjöberg", start_year: 2022, items: demoItems([["1TE035", "done"], ["TN0352", "done"], ["1TE028", "ongoing"], ["TN0350", "ongoing"], ["1RT890", "ongoing"], ["EX1032", "planned"]]) },
-  { name: "Viktor Nyström", start_year: 2023, items: demoItems([["1TE029", "ongoing"], ["1TE765", "ongoing"], ["1TE038", "planned"], ["1RT495", "planned"]]) },
+  { name: "Viktor Nyström", start_year: 2023, hide_done: true, items: [...demoItems([["1TE029", "ongoing"], ["1TE765", "ongoing"], ["1TE038", "planned"], ["1RT495", "planned"], ["1TE655", "done"]]), { id: "s1", year: 3, summer: true, row: 0, status: "planned", code: "1FA456" }] },
   { name: "Sara Bergman", start_year: 2023, items: demoItems([["1FA410", "ongoing"], ["1TS359", "planned"], ["1TS309", "planned"], ["1FA591", "planned"]]) },
 ].map(normalize);

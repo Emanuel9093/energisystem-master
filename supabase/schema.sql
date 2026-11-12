@@ -35,20 +35,46 @@ create table if not exists public.plans (
   user_id    uuid primary key default auth.uid() references auth.users (id) on delete cascade,
   name       text not null default '' check (char_length(name) <= 80),
   start_year int check (start_year between 2010 and 2040),
-  visible    boolean not null default true,
-  plan       jsonb not null default '{"courses": {}, "custom": []}'::jsonb,
+  hide_done  boolean not null default false,
+  plan       jsonb not null default '{"rows": {}, "summers": [], "items": []}'::jsonb,
   updated_at timestamptz not null default now()
 );
 
+-- Äldre version hade "visible". Nu syns alla planer, men man kan dölja sina avklarade kurser.
+alter table public.plans add column if not exists hide_done boolean not null default false;
+alter table public.plans drop column if exists visible;
+
 alter table public.plans enable row level security;
 
+-- Direkt läsning: bara den egna planen. Klasskompisarnas planer hämtas via
+-- classmate_plans() nedan, som tar bort avklarade kurser för den som valt att dölja dem.
 drop policy if exists "Läs egen och synliga planer" on public.plans;
-create policy "Läs egen och synliga planer" on public.plans
+drop policy if exists "Läs egen plan" on public.plans;
+create policy "Läs egen plan" on public.plans
   for select to authenticated
-  using (
-    user_id = auth.uid()
-    or (visible and public.email_allowed(auth.jwt() ->> 'email'))
-  );
+  using (user_id = auth.uid());
+
+create or replace function public.classmate_plans()
+returns table (user_id uuid, name text, start_year int, hide_done boolean, plan jsonb, updated_at timestamptz)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select p.user_id, p.name, p.start_year, p.hide_done,
+    case when p.hide_done then jsonb_set(p.plan, '{items}', coalesce(
+      (select jsonb_agg(i) from jsonb_array_elements(coalesce(p.plan -> 'items', '[]'::jsonb)) i where i ->> 'status' is distinct from 'done'),
+      '[]'::jsonb))
+    else p.plan end,
+    p.updated_at
+  from public.plans p
+  where public.email_allowed(auth.jwt() ->> 'email')
+    and p.user_id <> auth.uid()
+    and p.name <> ''
+$$;
+
+revoke all on function public.classmate_plans() from public, anon;
+grant execute on function public.classmate_plans() to authenticated;
 
 drop policy if exists "Skapa egen plan" on public.plans;
 create policy "Skapa egen plan" on public.plans

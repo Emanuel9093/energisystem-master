@@ -75,6 +75,7 @@ export function guideHTML() {
           <li>Varje år har fyra läsperioder: HT är period 1–2 och VT är period 3–4.</li>
           <li>Tre rader motsvarar normal studietakt (15 hp per period). Läser du utökat klickar du på <em>Lägg till rad</em>.</li>
           <li>Kurser som går över två perioder blir långa. Självständigt arbete och examensarbete tar alla tre rader.</li>
+          <li><strong>Sommarkurser:</strong> klicka på plustecknet mellan två år för att lägga till en sommar. Sommaren har en enda period och visas som en lista. Sommarkurser kan bara läggas på en sommar.</li>
           <li>Papperskorgen till höger tar bort en rad. Knapparna under rutnätet fyller i årets obligatoriska kurser, markerar hela året som klart eller tömmer året.</li>
         </ul>
       </section>
@@ -83,16 +84,16 @@ export function guideHTML() {
         <h2>Flikarna</h2>
         <div class="tab-cards">
           <div><h3>Min plan</h3><p>Dina fem år, ett år i taget, och kontrollen av examenskraven. Välj <em>Bara klara kurser</em> för att se hur långt du har kommit.</p></div>
-          <div><h3>Klasskompisar</h3><p>Se vilka kurser andra läser eller planerar, per kurs eller per person. Bra när du vill läsa med kompisar eller fråga någon om en kurs.</p></div>
+          <div><h3>Klasskompisar</h3><p>Överst ser du dina pågående och planerade kurser och vilka klasskompisar som läser dem samma period. Klicka på en person för att se hela hens plan, eller sök efter en person eller kurs.</p></div>
           <div><h3>Kurspoolen</h3><p>Alla kurser med behörighet, huvudområden och när de ges, sorterade i mappar. Alla ES-studenter kan lägga till kurser, skapa mappar och rätta uppgifter, till exempel om en kurs ges både HT och VT. Ändringarna syns för alla.</p></div>
-          <div><h3>Mina betyg</h3><p>Fyll i betyg för klara kurser så räknas ditt snitt ut automatiskt, viktat med hp. G och VG räknas inte in.</p></div>
+          <div><h3>Mina betyg</h3><p>Fyll i betyg för klara kurser så räknas ditt snitt ut automatiskt, viktat med hp, och du ser en kurva över hur snittet har ändrats termin för termin. G och VG räknas inte in.</p></div>
         </div>
       </section>
 
       <section class="card" id="g-integritet">
         <h2>Vad syns för andra?</h2>
         <ul class="tips">
-          <li><strong>Syns för andra ES-studenter:</strong> ditt namn, startår och vilka kurser du har i planen, med status. Bocka ur <em>Visa mina kurser för klasskompisar</em> om du vill vara osynlig.</li>
+          <li><strong>Syns för andra ES-studenter:</strong> ditt namn, startår och vilka kurser du har i planen, med status. Dina pågående och planerade kurser syns alltid. Bocka i <em>Dölj mina avklarade kurser för klasskompisar</em> om du inte vill visa vad du redan har läst.</li>
           <li><strong>Syns aldrig för andra:</strong> dina betyg och din e-postadress.</li>
           <li><strong>Kurspoolen är gemensam.</strong> Det du ändrar där syns för alla, med ditt namn som senaste ändrare.</li>
         </ul>

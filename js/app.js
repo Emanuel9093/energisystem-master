@@ -35,11 +35,10 @@ const state = {
   grades: {},
   view: sessionGet("es-view") || "plan",
   year: Number(sessionGet("es-year")) || 4,
+  summer: Number(sessionGet("es-summer")) || null, // vald sommar (sommaren efter år N) eller null
   scope: "all",
   picker: null,
   pickerQuery: "",
-  mateFolder: "valbara",
-  mateMode: "course",
   mateQuery: "",
   poolFolder: "programplanen",
   poolQuery: "",
@@ -187,7 +186,12 @@ const itemHp = (it) => itemCourse(it)?.hp ?? (Number(it.custom?.hp ?? it.snap?.h
 // Kopia av kursens grunddata, så att planen fungerar även om kursen tas bort ur poolen.
 const snapOf = (c) => ({ name: c.name, hp: c.hp, level: c.level, teknik: c.teknik });
 const rowsOf = (y) => state.plan.rows[y] ?? 3;
-const yearItems = (y) => state.plan.items.filter((it) => it.year === y);
+const yearItems = (y) => state.plan.items.filter((it) => it.year === y && !it.summer);
+const summerItems = (y) => state.plan.items.filter((it) => it.summer && it.year === y).sort((a, b) => a.row - b.row);
+const summerHp = (y) => summerItems(y).reduce((s, it) => s + itemHp(it), 0);
+const nextSummerRow = (y) => Math.max(-1, ...summerItems(y).map((it) => it.row)) + 1;
+const periodText = (it) => (it.summer ? "sommar" : `P${it.period}${it.span > 1 ? "–" + (it.period + it.span - 1) : ""}`);
+const whenText = (it) => (it.summer ? `Sommaren efter år ${it.year}` : `År ${it.year} · ${periodText(it)}`);
 const yearHp = (y) => yearItems(y).reduce((s, it) => s + itemHp(it), 0);
 const thickRowsOf = (y) => Math.min(THICK_ROWS, rowsOf(y));
 
@@ -282,23 +286,57 @@ function renderPlan() {
           <label class="field">Startår
             <input id="p-year" type="number" min="2010" max="2040" value="${esc(state.plan.start_year ?? "")}" placeholder="t.ex. 2022">
           </label>
-          <label class="check"><input id="p-visible" type="checkbox" ${state.plan.visible ? "checked" : ""}> Visa mina kurser för klasskompisar</label>
+          <label class="check" title="Pågående och planerade kurser syns alltid för klasskompisar."><input id="p-hide-done" type="checkbox" ${state.plan.hide_done ? "checked" : ""}> Dölj mina avklarade kurser för klasskompisar</label>
         </div>
 
-        <nav class="year-tabs" aria-label="Välj år">
-          ${[1, 2, 3, 4, 5].map((n) => `
-            <button data-year="${n}" class="${n === y ? "active" : ""}" aria-current="${n === y}">
-              <span>År ${n}</span><small>${yearHp(n)} hp</small>
-            </button>`).join("")}
-        </nav>
+        <nav class="year-tabs" aria-label="Välj år eller sommar">${yearTabs()}</nav>
 
-        <section class="card year-card" id="year-card">${yearCard(y)}</section>
+        <section class="card year-card" id="year-card">${state.summer ? summerCard(state.summer) : yearCard(y)}</section>
       </div>
       <aside class="sidebar card" id="reqs"></aside>
     </div>`;
 
   renderReqs();
   bindPlan();
+}
+
+// Årsflikar med ett plus mellan åren för att lägga till en sommar.
+function yearTabs() {
+  const sel = state.summer;
+  let html = "";
+  for (let n = 1; n <= 5; n++) {
+    const on = !sel && n === state.year;
+    html += `<button data-year="${n}" class="${on ? "active" : ""}" aria-current="${on}"><span>År ${n}</span><small>${yearHp(n)} hp</small></button>`;
+    if (n === 5) break;
+    if (state.plan.summers.includes(n)) {
+      const son = sel === n;
+      html += `<button data-summer="${n}" class="sum-tab ${son ? "active" : ""}" aria-current="${son}" title="Sommaren mellan år ${n} och ${n + 1}"><span class="sum-full">Sommar</span><span class="sum-short" aria-hidden="true">☀</span><small>${summerHp(n)} hp</small></button>`;
+    } else {
+      html += `<button data-add-summer="${n}" class="add-summer" title="Lägg till sommar mellan år ${n} och ${n + 1}" aria-label="Lägg till sommar mellan år ${n} och ${n + 1}">${ICONS.plus}</button>`;
+    }
+  }
+  return html;
+}
+
+function summerCard(y) {
+  const items = summerItems(y);
+  return `
+    <header class="year-head">
+      <h2>Sommar</h2>
+      <span class="year-hp">mellan år ${y} och ${y + 1} · ${summerHp(y)} hp</span>
+    </header>
+    <p class="muted small" style="margin-top:0">Sommaren har bara en period. Här kan du bara lägga sommarkurser.</p>
+    <div class="summer-list">
+      ${items.map((it) => {
+        const icon = it.status === "done" ? ICONS.lock : it.status === "ongoing" ? ICONS.clock : "";
+        return `<button class="pill ${it.status}" data-item="${esc(it.id)}" title="${esc(itemName(it))} – ${STATUSES[it.status]}">${icon}<span class="pill-name">${esc(itemName(it))}</span><span class="hp">${itemHp(it)} hp</span></button>`;
+      }).join("")}
+      <button class="slot summer-add" id="add-summer-course">${ICONS.plus} Lägg till sommarkurs</button>
+    </div>
+    <div class="year-actions">
+      <span class="spacer"></span>
+      <button class="btn small ghost danger" id="remove-summer">Ta bort sommaren</button>
+    </div>`;
 }
 
 function yearCard(y) {
@@ -362,14 +400,35 @@ function bindPlan() {
     state.plan.start_year = Number.isInteger(y) && y >= 2010 && y <= 2040 ? y : null;
     changed();
   };
-  $("#p-visible").onchange = (e) => { state.plan.visible = e.target.checked; changed(); };
+  $("#p-hide-done").onchange = (e) => { state.plan.hide_done = e.target.checked; changed(); };
 
   app.onclick = (ev) => {
     const t = ev.target;
     if (t.closest("#open-guide")) { markGuideSeen(); return showGuide(); }
     if (t.closest("#hide-welcome")) { markGuideSeen(); return renderPlan(); }
     const yb = t.closest("[data-year]");
-    if (yb) { state.year = Number(yb.dataset.year); sessionSet("es-year", state.year); return renderPlan(); }
+    if (yb) { state.year = Number(yb.dataset.year); selectSummer(null); return renderPlan(); }
+    const sb = t.closest("[data-summer]");
+    if (sb) { selectSummer(Number(sb.dataset.summer)); return renderPlan(); }
+    const ab = t.closest("[data-add-summer]");
+    if (ab) {
+      const n = Number(ab.dataset.addSummer);
+      state.plan.summers = [...new Set([...state.plan.summers, n])].sort();
+      selectSummer(n);
+      changed();
+      return renderPlan();
+    }
+    if (t.closest("#add-summer-course")) return openPicker({ year: state.summer, period: 1, row: nextSummerRow(state.summer), summer: true });
+    if (t.closest("#remove-summer")) {
+      const n = state.summer;
+      const list = summerItems(n);
+      if (list.length && !confirm(`Ta bort sommaren och ${plural(list.length, "kurs", "kurser")} (${list.map(itemName).join(", ")})?`)) return;
+      state.plan.items = state.plan.items.filter((it) => !list.includes(it));
+      state.plan.summers = state.plan.summers.filter((x) => x !== n);
+      selectSummer(null);
+      changed();
+      return renderPlan();
+    }
 
     const slot = t.closest("[data-slot]");
     if (slot) {
@@ -395,12 +454,18 @@ function bindPlan() {
     }
     if (t.closest("#clear-year")) {
       if (!confirm(`Ta bort alla kurser i år ${state.year}?`)) return;
-      state.plan.items = state.plan.items.filter((it) => it.year !== state.year);
+      state.plan.items = state.plan.items.filter((it) => it.year !== state.year || it.summer);
       state.plan.rows[state.year] = 3;
       changed();
       return renderPlan();
     }
   };
+}
+
+function selectSummer(n) {
+  state.summer = n;
+  sessionSet("es-summer", n || "");
+  sessionSet("es-year", state.year);
 }
 
 function deleteRow(y, r) {
@@ -475,10 +540,14 @@ function courseTags(c) {
 // perioder den faktiskt ges; klickar man i period 2 på en P1–2-kurs hamnar den i P1–2.
 // Är raden upptagen används första lediga rad.
 function slotFor(c, ctx, ignoreId) {
+  if (ctx.summer) {
+    return c.summer ? { start: 1, span: 1, row: nextSummerRow(ctx.year), err: null } : { err: `Ges inte på sommaren (ges ${offeringText(c).join(", ")}).` };
+  }
   const o = c.offerings.find((x) => x.periods.includes(ctx.period));
   let start, span;
   if (o) { start = o.periods[0]; span = o.periods.length; }
-  else if (c.anyPeriod || c.summer) { start = ctx.period; span = 1; }
+  else if (c.anyPeriod) { start = ctx.period; span = 1; }
+  else if (c.summer) return { err: "Sommarkurs. Lägg till en sommar med plustecknet mellan två år och lägg kursen där." };
   else return { err: `Ges inte i period ${ctx.period} (ges ${offeringText(c).join(", ")}).` };
   if (c.thick) return { start, span, row: 0, err: placementError(ctx.year, start, 0, span, true, ignoreId) };
   const rows = [ctx.row, ...[...Array(rowsOf(ctx.year)).keys()].filter((r) => r !== ctx.row)];
@@ -494,9 +563,9 @@ function pickEntry(c, ctx) {
   const placed = placedWhere(c.id);
   const replaces = groupItem(c);
   const slot = slotFor(c, ctx, replaces?.year === ctx.year ? replaces.id : undefined);
-  const err = placed ? `Redan inlagd i år ${placed.year}` : slot.err;
+  const err = placed ? `Redan inlagd (${whenText(placed).toLowerCase()})` : slot.err;
   const mates = matesFor(c.id).length;
-  const where = slot.err ? "" : `Hamnar i period ${Number(slot.start)}${slot.span > 1 ? "–" + (Number(slot.start) + Number(slot.span) - 1) : ""}`;
+  const where = slot.err ? "" : ctx.summer ? "Hamnar på sommaren" : `Hamnar i period ${Number(slot.start)}${slot.span > 1 ? "–" + (Number(slot.start) + Number(slot.span) - 1) : ""}`;
   return `
     <button class="pick" data-pick="${esc(c.id)}" ${err ? "disabled" : ""}>
       <span class="pick-main">
@@ -516,13 +585,16 @@ function pickEntry(c, ctx) {
 function renderPicker() {
   const ctx = state.picker;
   const q = state.pickerQuery.trim().toLowerCase();
-  const runsHere = (c) => c.offerings.some((o) => o.periods.includes(ctx.period));
+  const runsHere = (c) => (ctx.summer ? c.summer : c.offerings.some((o) => o.periods.includes(ctx.period)));
   let sections;
 
   if (q) {
     const hits = pool.courses.filter((c) => c.name.toLowerCase().includes(q) || (c.code || "").toLowerCase().includes(q));
-    const ok = hits.filter((c) => runsHere(c) || c.anyPeriod || c.summer);
-    sections = [["Sökresultat", ok], [`Ges inte i period ${ctx.period}`, hits.filter((c) => !ok.includes(c))]];
+    const ok = hits.filter((c) => runsHere(c) || (!ctx.summer && c.anyPeriod));
+    sections = [["Sökresultat", ok], [ctx.summer ? "Ges inte på sommaren" : `Ges inte i period ${ctx.period}`, hits.filter((c) => !ok.includes(c))]];
+  } else if (ctx.summer) {
+    const here = pool.courses.filter(runsHere);
+    sections = [["Sommarkurser", here]];
   } else {
     const shown = new Set();
     const take = (list) => list.filter((c) => !shown.has(c.id) && shown.add(c.id));
@@ -530,7 +602,7 @@ function renderPicker() {
     sections = [[`Rekommenderat år ${ctx.year}, ges i period ${ctx.period}`, take(here.filter((c) => c.year === ctx.year))]];
     for (const f of pool.folders) sections.push([`${f.name} – ges i period ${ctx.period}`, take(here.filter((c) => c.folders.includes(f.id)))]);
     sections.push([`Övriga kurser i period ${ctx.period}`, take(here)]);
-    sections.push(["Valfri period och sommar", take(pool.courses.filter((c) => c.anyPeriod || c.summer))]);
+    sections.push(["Valfri period", take(pool.courses.filter((c) => c.anyPeriod))]);
   }
 
   const body = sections
@@ -542,7 +614,7 @@ function renderPicker() {
     <div class="dlg-head">
       <div>
         <h2>Välj kurs</h2>
-        <p class="muted small">År ${ctx.year} · period ${ctx.period} · rad ${ctx.row + 1}</p>
+        <p class="muted small">${ctx.summer ? `Sommaren mellan år ${ctx.year} och ${ctx.year + 1}` : `År ${ctx.year} · period ${ctx.period} · rad ${ctx.row + 1}`}</p>
       </div>
       <button class="icon-btn" data-close aria-label="Stäng">✕</button>
     </div>
@@ -556,9 +628,9 @@ function renderPicker() {
         <label class="field">Kurskod<input name="code" placeholder="valfritt"></label>
         <label class="field">hp<input name="hp" type="number" min="0.5" step="0.5" required value="5"></label>
         <label class="field">Nivå<select name="level">${LEVELS.map((l) => `<option ${l === "A1N" ? "selected" : ""}>${l}</option>`).join("")}</select></label>
-        <label class="field">Perioder<select name="span">${[1, 2, 3, 4].map((n) => `<option value="${n}">${n}</option>`).join("")}</select></label>
+        ${ctx.summer ? "" : `<label class="field">Perioder<select name="span">${[1, 2, 3, 4].map((n) => `<option value="${n}">${n}</option>`).join("")}</select></label>`}
         <label class="check"><input type="checkbox" name="teknik" checked> Huvudområde teknik</label>
-        <label class="check"><input type="checkbox" name="thick"> Tjock (tar tre rader)</label>
+        ${ctx.summer ? "" : `<label class="check"><input type="checkbox" name="thick"> Tjock (tar tre rader)</label>`}
         <p class="pick-err" id="custom-err"></p>
         <button class="btn primary" type="submit">Lägg till</button>
       </form>
@@ -577,12 +649,12 @@ function renderPicker() {
   $("#custom-form").onsubmit = (ev) => {
     ev.preventDefault();
     const f = new FormData(ev.target);
-    const span = Number(f.get("span"));
-    const thick = f.get("thick") === "on";
-    const err = placementError(ctx.year, ctx.period, ctx.row, span, thick);
+    const span = ctx.summer ? 1 : Number(f.get("span"));
+    const thick = !ctx.summer && f.get("thick") === "on";
+    const err = ctx.summer ? null : placementError(ctx.year, ctx.period, ctx.row, span, thick);
     if (err) { $("#custom-err").textContent = err; return; }
-    addItem(ctx.year, ctx.period, ctx.row, {
-      span, thick,
+    addItem(ctx.year, ctx.summer ? 1 : ctx.period, ctx.summer ? nextSummerRow(ctx.year) : ctx.row, {
+      span, thick, ...(ctx.summer ? { summer: true } : {}),
       custom: { name: f.get("name").trim(), code: f.get("code").trim(), hp: Number(f.get("hp")), level: f.get("level"), teknik: f.get("teknik") === "on" },
     });
     dlg.close();
@@ -594,6 +666,8 @@ function renderPicker() {
 let dlgHandler = null;
 dlg.addEventListener("click", (ev) => {
   if (ev.target === dlg || ev.target.closest("[data-close]")) return dlg.close();
+  const person = ev.target.closest("[data-person]");
+  if (person) return openPerson(Number(person.dataset.person));
   if (dlgHandler) return dlgHandler(ev);
   const pick = ev.target.closest("[data-pick]");
   if (pick && !pick.disabled && state.picker) {
@@ -603,7 +677,7 @@ dlg.addEventListener("click", (ev) => {
     const slot = slotFor(c, ctx, replaces?.year === ctx.year ? replaces.id : undefined);
     if (slot.err) { alert(slot.err); return; }
     if (replaces) state.plan.items = state.plan.items.filter((x) => x !== replaces);
-    addItem(ctx.year, slot.start, slot.row, { code: c.id, span: slot.span, thick: !!c.thick, snap: snapOf(c) }, replaces?.status || "planned");
+    addItem(ctx.year, slot.start, slot.row, { code: c.id, span: slot.span, thick: !ctx.summer && !!c.thick, snap: snapOf(c), ...(ctx.summer ? { summer: true } : {}) }, replaces?.status || "planned");
     dlg.close();
     renderPlan();
     return;
@@ -621,7 +695,8 @@ dlg.addEventListener("click", (ev) => {
     const it = state.plan.items.find((x) => x.id === sw.dataset.id);
     const alt = courseById(sw.dataset.swap);
     const altOff = alt?.offerings.find((o) => o.periods[0] === it.period && o.periods.length === it.span);
-    if (!alt || placedWhere(alt.id) || (!altOff && !alt.anyPeriod) || !!alt.thick !== !!it.thick) {
+    const fits = it.summer ? alt?.summer : (altOff || alt?.anyPeriod) && !!alt.thick === !!it.thick;
+    if (!alt || placedWhere(alt.id) || !fits) {
       alert("Varianten går inte att byta till på samma plats. Ta bort kursen och välj den andra varianten i kursväljaren.");
       return;
     }
@@ -656,12 +731,11 @@ function openItem(id) {
   const c = itemCourse(it);
   const x = it.custom || it.snap || {};
   const mates = c ? matesFor(c.id) : [];
-  const periods = Array.from({ length: it.span }, (_, i) => it.period + i).join("–");
   openDialog(`
     <div class="dlg-head">
       <div>
         <h2>${esc(itemName(it))}</h2>
-        <p class="muted small">År ${it.year} · period ${periods}${it.thick ? " · tar alla tre rader" : ""}</p>
+        <p class="muted small">${esc(whenText(it))}${it.thick ? " · tar alla tre rader" : ""}</p>
       </div>
       <button class="icon-btn" data-close aria-label="Stäng">✕</button>
     </div>
@@ -1025,25 +1099,121 @@ function openCourseEditor(c) {
 // ---------- Mina betyg ----------
 
 const gradeKey = (it) => it.code || it.id;
+const NUM_GRADES = ["3", "4", "5"];
+
+// Terminen då kursen avslutas: 0 = HT, 1 = VT, 2 = sommar. Index räknas från år 1 HT.
+const endTermIndex = (it) => (it.year - 1) * 3 + (it.summer ? 2 : it.period + it.span - 1 <= 2 ? 0 : 1);
+
+function termName(idx) {
+  const y = Math.floor(idx / 3) + 1;
+  const t = idx % 3;
+  const sy = state.plan.start_year;
+  if (sy) return t === 0 ? `HT ${String(sy + y - 1).slice(2)}` : t === 1 ? `VT ${String(sy + y).slice(2)}` : `Sommar ${String(sy + y).slice(2)}`;
+  return `År ${y} ${["HT", "VT", "sommar"][t]}`;
+}
+
+// Viktat snitt efter varje termin där minst ett sifferbetyg tillkom.
+function gpaSeries(rows) {
+  const byTerm = new Map();
+  for (const it of rows) {
+    const g = state.grades[gradeKey(it)];
+    if (!NUM_GRADES.includes(g)) continue;
+    const k = endTermIndex(it);
+    if (!byTerm.has(k)) byTerm.set(k, []);
+    byTerm.get(k).push({ hp: itemHp(it), g: Number(g) });
+  }
+  let hp = 0, sum = 0;
+  return [...byTerm.keys()].sort((a, b) => a - b).map((k) => {
+    const list = byTerm.get(k);
+    const termHp = list.reduce((s, x) => s + x.hp, 0);
+    hp += termHp;
+    sum += list.reduce((s, x) => s + x.hp * x.g, 0);
+    return { label: termName(k), gpa: hp ? sum / hp : null, termHp, courses: list.length };
+  }).filter((p) => p.gpa !== null);
+}
+
+function gpaChart(series) {
+  if (series.length < 2) {
+    return `<p class="muted small">Kurvan visas när du har betyg från minst två terminer.</p>`;
+  }
+  const W = 960, H = 240, L = 40, R = 16, T = 14, B = 34;
+  const lo = 3, hi = 5;
+  const x = (i) => L + (series.length === 1 ? (W - L - R) / 2 : (i * (W - L - R)) / (series.length - 1));
+  const y = (v) => T + ((hi - v) / (hi - lo)) * (H - T - B);
+  const grid = [3, 3.5, 4, 4.5, 5].map((v) => `
+    <line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" class="gpa-grid"/>
+    <text x="${L - 8}" y="${y(v) + 4}" text-anchor="end" class="gpa-axis">${v.toFixed(1)}</text>`).join("");
+  const every = Math.ceil(series.length / 8);
+  const labels = series.map((p, i) => (i % every === 0 || i === series.length - 1)
+    ? `<text x="${x(i)}" y="${H - 10}" text-anchor="middle" class="gpa-axis">${esc(p.label)}</text>` : "").join("");
+  const path = series.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.gpa).toFixed(1)}`).join(" ");
+  const last = series[series.length - 1];
+  const dots = series.map((p, i) => `
+    <g class="gpa-pt" data-i="${i}">
+      <circle cx="${x(i)}" cy="${y(p.gpa)}" r="14" class="gpa-hit"/>
+      <circle cx="${x(i)}" cy="${y(p.gpa)}" r="4.5" class="gpa-dot"/>
+    </g>`).join("");
+  return `
+    <div class="gpa-chart" id="gpa-chart">
+      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Viktat snitt över tid, från ${series[0].gpa.toFixed(2)} till ${last.gpa.toFixed(2)}">
+        ${grid}${labels}
+        <path d="${path}" class="gpa-line"/>
+        <text x="${x(series.length - 1) - 8}" y="${y(last.gpa) - 10}" text-anchor="end" class="gpa-last">${last.gpa.toFixed(2)}</text>
+        ${dots}
+      </svg>
+      <div class="gpa-tip" id="gpa-tip" hidden></div>
+    </div>
+    <details class="gpa-table">
+      <summary>Visa som tabell</summary>
+      <table>
+        <thead><tr><th>Termin</th><th>Nya hp</th><th>Viktat snitt</th></tr></thead>
+        <tbody>${series.map((p) => `<tr><td>${esc(p.label)}</td><td>${p.termHp}</td><td>${p.gpa.toFixed(2)}</td></tr>`).join("")}</tbody>
+      </table>
+    </details>`;
+}
+
+function bindGpaChart(series) {
+  const box = $("#gpa-chart");
+  if (!box) return;
+  const tip = $("#gpa-tip");
+  const show = (g) => {
+    const p = series[Number(g.dataset.i)];
+    const dot = g.querySelector(".gpa-dot").getBoundingClientRect();
+    const r = box.getBoundingClientRect();
+    tip.innerHTML = `<strong>${esc(p.label)}</strong><span>Viktat snitt ${p.gpa.toFixed(2)}</span><span class="muted">${plural(p.courses, "kurs", "kurser")} · ${p.termHp} hp den terminen</span>`;
+    tip.hidden = false;
+    const left = Math.min(Math.max(dot.left - r.left + dot.width / 2, 70), r.width - 70);
+    tip.style.left = `${left}px`;
+    tip.style.top = `${dot.top - r.top}px`;
+    box.querySelectorAll(".gpa-pt").forEach((x) => x.classList.toggle("on", x === g));
+  };
+  box.querySelectorAll(".gpa-pt").forEach((g) => {
+    g.addEventListener("mouseenter", () => show(g));
+    g.addEventListener("click", () => show(g));
+  });
+  box.addEventListener("mouseleave", () => { tip.hidden = true; box.querySelectorAll(".gpa-pt").forEach((x) => x.classList.remove("on")); });
+}
 
 function renderGrades() {
-  const done = state.plan.items.filter((it) => it.status === "done").sort((a, b) => a.year - b.year || a.period - b.period || a.row - b.row);
+  const order = (it) => it.year * 10 + (it.summer ? 5 : it.period);
+  const done = state.plan.items.filter((it) => it.status === "done").sort((a, b) => order(a) - order(b) || a.row - b.row);
   const seen = new Set();
   const rows = done.filter((it) => !seen.has(gradeKey(it)) && seen.add(gradeKey(it)));
 
-  let hpNum = 0, sum = 0, unweightedSum = 0, nNum = 0, missing = 0;
+  let hpNum = 0, sum = 0, missing = 0;
   const dist = { 3: 0, 4: 0, 5: 0 };
   for (const it of rows) {
     const g = state.grades[gradeKey(it)];
     if (!g) { missing++; continue; }
-    if (["3", "4", "5"].includes(g)) {
+    if (NUM_GRADES.includes(g)) {
       const hp = itemHp(it);
-      hpNum += hp; sum += hp * Number(g); unweightedSum += Number(g); nNum++;
+      hpNum += hp; sum += hp * Number(g);
       dist[g] += hp;
     }
   }
   const gpa = hpNum ? sum / hpNum : null;
   const maxDist = Math.max(1, ...Object.values(dist));
+  const series = gpaSeries(rows);
 
   const byYear = [1, 2, 3, 4, 5].map((y) => {
     const list = rows.filter((it) => it.year === y);
@@ -1058,7 +1228,7 @@ function renderGrades() {
             <div class="grade-row">
               <div>
                 <div class="course-name">${esc(itemName(it))}</div>
-                <div class="course-meta"><span>${esc(c?.code || it.custom?.code || "")}</span><span>${itemHp(it)} hp</span></div>
+                <div class="course-meta"><span>${esc(c?.code || it.custom?.code || "")}</span><span>${itemHp(it)} hp</span>${it.summer ? `<span class="tag">Sommar</span>` : ""}</div>
               </div>
               <div class="seg grade-seg" role="group" aria-label="Betyg för ${esc(itemName(it))}">
                 ${GRADES.map((v) => `<button data-grade="${esc(gradeKey(it))}" data-value="${v}" class="${g === v ? "on" : ""}" aria-pressed="${g === v}">${v}</button>`).join("")}
@@ -1076,17 +1246,22 @@ function renderGrades() {
       </div>
       <div class="stats">
         <div class="card stat main"><span class="stat-label">Viktat snitt</span><span class="stat-value">${gpa ? gpa.toFixed(2) : "–"}</span><span class="muted small">viktat med hp, betyg 3–5</span></div>
-        <div class="card stat"><span class="stat-label">Oviktat snitt</span><span class="stat-value">${nNum ? (unweightedSum / nNum).toFixed(2) : "–"}</span><span class="muted small">${plural(nNum, "kurs", "kurser")}</span></div>
         <div class="card stat"><span class="stat-label">hp med sifferbetyg</span><span class="stat-value">${hpNum}</span><span class="muted small">${missing ? `${plural(missing, "kurs", "kurser")} utan betyg` : "Alla klara kurser har betyg"}</span></div>
         <div class="card stat dist">
           <span class="stat-label">Fördelning (hp)</span>
           ${["5", "4", "3"].map((g) => `<div class="dist-row"><span>${g}</span><div class="dist-bar"><i style="width:${(dist[g] / maxDist) * 100}%"></i></div><span class="muted">${dist[g]}</span></div>`).join("")}
         </div>
       </div>
+      ${rows.length ? `<div class="card">
+        <h2 style="margin-top:0">Viktat snitt över tid</h2>
+        <p class="muted small" style="margin-top:-6px">Ditt sammanlagda viktade snitt efter varje termin. Kurser räknas till terminen då de slutar.${state.plan.start_year ? "" : " Fyll i startår under Min plan för att se årtal."}</p>
+        ${gpaChart(series)}
+      </div>` : ""}
       ${byYear || `<div class="card empty">Inga kurser är markerade som klara ännu. Markera kurser som klara under Min plan.</div>`}
       <p class="muted small">G och VG räknas inte in i snittet. Klicka på ett valt betyg igen för att ta bort det.</p>
     </div>`;
 
+  bindGpaChart(series);
   app.onclick = (ev) => {
     const b = ev.target.closest("[data-grade]");
     if (!b) return;
@@ -1101,94 +1276,123 @@ function renderGrades() {
 // ---------- Klasskompisar ----------
 
 const okStatus = (s) => (STATUSES[s] ? s : "planned");
+const itemKey = (it) => (it.code ? "c:" + it.code : "p:" + (it.custom?.code || it.custom?.name || "").trim().toLowerCase());
+
+// Kursens plats i tiden, i "periodsteg": varje läsår har period 1–4 och sommaren som steg 5.
+// Med startår jämförs riktiga läsår, annars bara årskurs och period.
+function timeSpan(plan, it, useCalendar) {
+  const base = ((useCalendar ? plan.start_year - 1 : 0) + it.year) * 5;
+  return it.summer ? [base + 5, base + 5] : [base + it.period, base + it.period + it.span - 1];
+}
+
+function sameTime(planA, a, planB, b) {
+  const cal = !!(planA.start_year && planB.start_year);
+  const [a1, a2] = timeSpan(planA, a, cal);
+  const [b1, b2] = timeSpan(planB, b, cal);
+  return a1 <= b2 && b1 <= a2;
+}
+
+function calendarText(plan, it) {
+  const sy = plan.start_year;
+  if (!sy) return "";
+  if (it.summer) return `Sommaren ${sy + it.year}`;
+  const ht = it.period <= 2, vtEnd = it.period + it.span - 1 >= 3;
+  if (ht && vtEnd) return `HT ${sy + it.year - 1}–VT ${sy + it.year}`;
+  return ht ? `HT ${sy + it.year - 1}` : `VT ${sy + it.year}`;
+}
 
 function personChip(m, status, me = false) {
   const st = okStatus(status);
-  return `<span class="person ${me ? "me" : ""}" title="${esc(STATUSES[st])}">
-    <span class="avatar">${esc(initials(me ? state.plan.name || "Du" : m.name))}</span>${esc(me ? "Du" : m.name)}<span class="dot ${st}"></span></span>`;
+  if (me) {
+    return `<span class="person me" title="${esc(STATUSES[st])}"><span class="avatar">${esc(initials(state.plan.name || "Du"))}</span>Du<span class="dot ${st}"></span></span>`;
+  }
+  const i = state.mates.indexOf(m);
+  return `<button class="person" data-person="${i}" title="${esc(m.name)} · ${esc(STATUSES[st])} – visa hela planen">
+    <span class="avatar">${esc(initials(m.name))}</span>${esc(m.name)}<span class="dot ${st}"></span></button>`;
 }
 
 function renderMates() {
-  const me = { name: state.plan.name || "Du", items: state.plan.items };
-  const everyone = [...state.mates.map((m) => ({ m, me: false })), { m: me, me: true }];
-  const f = state.mateFolder;
-  const q = state.mateQuery.toLowerCase();
+  const me = state.plan;
+  const q = state.mateQuery.trim().toLowerCase();
 
-  const courseList = f === "valbara"
-    ? pool.courses.filter((c) => !(c.inStudyPlan && c.type === "obl" && (c.year ?? 9) <= 3))
-    : f === "custom" ? [] : coursesIn(f).filter((c) => !(c.inStudyPlan && c.type === "obl" && (c.year ?? 9) <= 3));
+  // 1. Mina pågående och planerade kurser, och vem som läser dem samtidigt
+  const order = (it) => it.year * 10 + (it.summer ? 5 : it.period);
+  const mine = me.items.filter((it) => it.status !== "done").sort((a, b) => order(a) - order(b) || a.row - b.row);
+  const mineHtml = mine.map((it) => {
+    const key = itemKey(it);
+    const same = [], other = [];
+    for (const m of state.mates) {
+      const mi = m.items.find((x) => itemKey(x) === key);
+      if (!mi) continue;
+      (sameTime(me, it, m, mi) ? same : other).push({ m, mi });
+    }
+    const cal = calendarText(me, it);
+    return `
+      <div class="mate-course">
+        <div>
+          <div class="course-name"><span class="dot ${okStatus(it.status)}" title="${esc(STATUSES[okStatus(it.status)])}"></span> ${esc(itemName(it))}</div>
+          <div class="course-meta"><span>${esc(whenText(it))}</span>${cal ? `<span>${esc(cal)}</span>` : ""}<span>${itemHp(it)} hp</span></div>
+        </div>
+        <div>
+          ${same.length ? `<div class="people">${same.map(({ m, mi }) => personChip(m, mi.status)).join("")}</div>`
+            : `<span class="muted small">Ingen klasskompis läser den samtidigt.</span>`}
+          ${other.length ? `<div class="other-time"><span class="muted small">Vid annan tid:</span> <div class="people">${other.map(({ m, mi }) => personChip(m, mi.status)).join("")}</div></div>` : ""}
+        </div>
+      </div>`;
+  }).join("");
 
-  const items = [];
-  for (const c of courseList) {
-    const takers = everyone.map((e) => ({ ...e, it: e.m.items.find((x) => x.code === c.id) })).filter((e) => e.it);
-    if (!takers.some((t) => !t.me)) continue;
-    items.push({ name: c.name, meta: `${c.code || ""} · ${c.hp} hp · ${c.level} · ${offeringText(c).join(", ")}`, takers: takers.map((t) => ({ ...t, status: t.it.status })) });
-  }
-  if (f === "custom" || f === "valbara") {
-    const map = new Map();
-    for (const { m, me: isMe } of everyone) {
-      for (const it of m.items.filter((x) => x.custom)) {
-        const x = it.custom;
-        const key = (x.code || x.name).trim().toLowerCase();
-        if (!map.has(key)) map.set(key, { name: x.name, meta: `${x.code ? x.code + " · " : ""}${x.hp} hp · ${x.level} · privat kurs`, takers: [] });
-        map.get(key).takers.push({ m, me: isMe, status: it.status });
+  // 2. Sök klasskompis eller kurs
+  let searchHtml = `<p class="muted small" style="margin:0">Sök på ett namn för att se en klasskompis hela plan, eller på en kurs för att se vilka som läser den.</p>`;
+  if (q) {
+    const people = state.mates.filter((m) => m.name.toLowerCase().includes(q));
+    const courses = new Map();
+    for (const m of state.mates) {
+      for (const it of m.items) {
+        const c = itemCourse(it);
+        const name = itemName(it);
+        const code = c?.code || it.custom?.code || "";
+        if (!name.toLowerCase().includes(q) && !code.toLowerCase().includes(q)) continue;
+        if (c && c.inStudyPlan && c.type === "obl" && (c.year ?? 9) <= 3) continue;
+        const key = itemKey(it);
+        if (!courses.has(key)) courses.set(key, { name, code, hp: itemHp(it), takers: [] });
+        courses.get(key).takers.push({ m, it });
       }
     }
-    for (const v of map.values()) if (v.takers.some((t) => !t.me)) items.push(v);
+    const list = [...courses.values()].sort((a, b) => b.takers.length - a.takers.length).slice(0, 30);
+    searchHtml = `
+      ${people.length ? `<h3 class="pick-h">Klasskompisar</h3><div class="people">${people.map((m) => personChip(m, "planned").replace(/<span class="dot[^>]*><\/span>/, "")).join("")}</div>` : ""}
+      ${list.length ? `<h3 class="pick-h">Kurser</h3>${list.map((x) => `
+        <div class="mate-course compact">
+          <div><div class="course-name">${esc(x.name)}</div><div class="course-meta">${x.code ? `<span>${esc(x.code)}</span>` : ""}<span>${x.hp} hp</span></div></div>
+          <div class="people">${x.takers.map(({ m, it }) => personChip(m, it.status)).join("")}</div>
+        </div>`).join("")}` : ""}
+      ${!people.length && !list.length ? `<p class="muted small" style="margin:0">Ingen klasskompis eller kurs matchar "${esc(state.mateQuery.trim())}".</p>` : ""}`;
   }
-  const filtered = items
-    .filter((i) => !q || i.name.toLowerCase().includes(q) || i.meta.toLowerCase().includes(q) || i.takers.some((t) => t.m.name.toLowerCase().includes(q)))
-    .sort((a, b) => b.takers.length - a.takers.length);
-
-  const byCourse = filtered.length
-    ? `<div class="card" style="padding:0">${filtered.map((i) => `
-        <div class="mate-course">
-          <div><div class="course-name">${esc(i.name)}</div><div class="course-meta">${esc(i.meta)}</div></div>
-          <div class="people">${i.takers.sort((a, b) => a.me - b.me).map((t) => personChip(t.m, t.status, t.me)).join("")}</div>
-        </div>`).join("")}</div>`
-    : `<div class="card empty">${state.mates.length ? "Inga klasskompisar har valt kurser här ännu." : "Inga klasskompisar har lagt in sina kurser ännu. Dela länken till sidan!"}</div>`;
-
-  const people = state.mates
-    .filter((m) => !q || m.name.toLowerCase().includes(q))
-    .map((m) => {
-      const list = m.items
-        .filter((it) => it.custom || (courseById(it.code) && !(courseById(it.code).type === "obl" && (courseById(it.code).year ?? 9) <= 3)))
-        .sort((a, b) => a.year - b.year || a.period - b.period)
-        .map((it) => ({ name: itemName(it), meta: `År ${it.year} · P${it.period}${it.span > 1 ? "–" + (it.period + it.span - 1) : ""}`, status: it.status }));
-      return `
-        <div class="card person-card">
-          <h3><span class="avatar">${esc(initials(m.name))}</span>${esc(m.name)}</h3>
-          <div class="muted small">${m.start_year ? `Började ${m.start_year}` : ""}</div>
-          ${list.length ? `<ul>${list.map((x) => `<li><span class="dot ${okStatus(x.status)}" title="${esc(STATUSES[okStatus(x.status)])}"></span>${esc(x.name)}<span class="muted">${esc(x.meta)}</span></li>`).join("")}</ul>` : `<p class="muted small">Inga valbara kurser inlagda.</p>`}
-        </div>`;
-    }).join("");
-
-  const opts = [["valbara", "Alla utom obligatoriska åk 1–3"], ...pool.folders.map((x) => [x.id, x.name]), ["custom", "Privata kurser"]];
 
   app.innerHTML = `
     <div class="stack">
       <div>
         <h1>Klasskompisar</h1>
-        <p class="muted" style="margin:0">Se vilka kurser andra läser eller planerar. ${plural(state.mates.length, "klasskompis", "klasskompisar")} delar sina kurser.</p>
-      </div>
-      <div class="toolbar">
-        <div class="seg" role="group" aria-label="Visa">
-          <button data-mode="course" class="${state.mateMode === "course" ? "on" : ""}">Per kurs</button>
-          <button data-mode="person" class="${state.mateMode === "person" ? "on" : ""}">Per person</button>
-        </div>
-        ${state.mateMode === "course" ? `<select id="mate-folder" aria-label="Urval">${opts.map(([v, l]) => `<option value="${esc(v)}" ${v === f ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>` : ""}
-        <input type="search" id="mate-q" placeholder="Sök kurs eller namn" value="${esc(state.mateQuery)}">
+        <p class="muted" style="margin:0">Vilka läser samma kurser som du, samtidigt? Klicka på en person för att se hela hens plan. ${plural(state.mates.length, "klasskompis", "klasskompisar")} har lagt in sina kurser.</p>
       </div>
       <div class="legend"><span><span class="dot done"></span> Klar</span><span><span class="dot ongoing"></span> Läser nu</span><span><span class="dot planned"></span> Planerar</span></div>
-      ${state.mateMode === "course" ? byCourse : people ? `<div class="people-grid">${people}</div>` : `<div class="card empty">Ingen matchar sökningen.</div>`}
+
+      <section class="card" style="padding:0">
+        <h2 class="card-title">Mina pågående och planerade kurser</h2>
+        ${mineHtml || `<p class="muted empty-pad">Du har inga pågående eller planerade kurser. Lägg till kurser under Min plan.</p>`}
+      </section>
+
+      <section class="card">
+        <h2 style="margin:0 0 10px">Sök</h2>
+        <input type="search" id="mate-q" placeholder="Sök klasskompis eller kurs" value="${esc(state.mateQuery)}" style="width:100%">
+        <div id="mate-results" style="margin-top:10px">${searchHtml}</div>
+      </section>
     </div>`;
 
   app.onclick = (ev) => {
-    const b = ev.target.closest("[data-mode]");
-    if (b) { state.mateMode = b.dataset.mode; renderMates(); }
+    const b = ev.target.closest("[data-person]");
+    if (b) openPerson(Number(b.dataset.person));
   };
-  const sel = $("#mate-folder");
-  if (sel) sel.onchange = () => { state.mateFolder = sel.value; renderMates(); };
   const mq = $("#mate-q");
   mq.oninput = () => {
     state.mateQuery = mq.value;
@@ -1198,6 +1402,43 @@ function renderMates() {
     n.focus();
     n.setSelectionRange(pos, pos);
   };
+}
+
+// Hela planen för en klasskompis
+function openPerson(i) {
+  const m = state.mates[i];
+  if (!m) return;
+  state.picker = null;
+  const myKeys = new Set(state.plan.items.map(itemKey));
+  const total = m.items.reduce((s, it) => s + itemHp(it), 0);
+  const blocks = [];
+  for (let y = 1; y <= 5; y++) {
+    const list = m.items.filter((it) => it.year === y && !it.summer).sort((a, b) => a.period - b.period || a.row - b.row);
+    blocks.push({ title: `År ${y}`, sub: m.start_year ? `${m.start_year + y - 1}/${String(m.start_year + y).slice(2)}` : "", list });
+    const sum = m.items.filter((it) => it.year === y && it.summer);
+    if (sum.length) blocks.push({ title: "Sommar", sub: m.start_year ? String(m.start_year + y) : `efter år ${y}`, list: sum });
+  }
+  const rowHtml = (it) => `
+    <li class="${myKeys.has(itemKey(it)) ? "shared" : ""}">
+      <span class="dot ${okStatus(it.status)}" title="${esc(STATUSES[okStatus(it.status)])}"></span>
+      <span class="pp-name">${esc(itemName(it))}${myKeys.has(itemKey(it)) ? ` <span class="tag mates">Du också</span>` : ""}</span>
+      <span class="muted">${esc(periodText(it))} · ${itemHp(it)} hp</span>
+    </li>`;
+  openDialog(`
+    <div class="dlg-head">
+      <div>
+        <h2><span class="avatar big">${esc(initials(m.name))}</span> ${esc(m.name)}</h2>
+        <p class="muted small">${m.start_year ? `Började ${m.start_year} · ` : ""}${total} hp i planen${m.hide_done ? " · visar inte sina avklarade kurser" : ""}</p>
+      </div>
+      <button class="icon-btn" data-close aria-label="Stäng">✕</button>
+    </div>
+    <div class="legend" style="margin-top:0"><span><span class="dot done"></span> Klar</span><span><span class="dot ongoing"></span> Läser nu</span><span><span class="dot planned"></span> Planerar</span></div>
+    <div class="person-plan">
+      ${blocks.filter((b) => b.list.length).map((b) => `
+        <h3 class="pick-h">${esc(b.title)}${b.sub ? ` <span class="muted">${esc(b.sub)}</span>` : ""} <span class="muted">· ${b.list.reduce((s, it) => s + itemHp(it), 0)} hp</span></h3>
+        <ul>${b.list.map(rowHtml).join("")}</ul>`).join("") || `<p class="muted">Inga kurser att visa.</p>`}
+    </div>
+    <div class="dlg-foot"><span></span><button class="btn" data-close>Stäng</button></div>`);
 }
 
 start();

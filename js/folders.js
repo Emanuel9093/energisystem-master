@@ -27,6 +27,25 @@ export const SEED_FOLDERS = [
     sort: 3,
     courseIds: ["1MA090", "1MA013", "1MA016", "1MA024", "1MA034", "MS0073", "1TD342"],
   },
+  {
+    id: "sommarkurser",
+    name: "Sommarkurser",
+    description:
+      "Kurser som läses under sommaren, ofta på distans. Lägg till en sommar med plustecknet mellan två år under Min plan. Sommarkurser kan bara läggas på en sommar. " +
+      "Kurser som inte står i studieplanen räknas till de 30 hp som får väljas fritt. Ändra en kurs och bocka i Sommar om den ska finnas här.",
+    sort: 4,
+    courseIds: [],
+  },
+  {
+    id: "utbyte",
+    name: "Utbytesstudier",
+    description:
+      "Kurser som ES-studenter har läst på utbyte, så att du ser vad andra har tagit med sig hem. Ange universitet och land i kursens anteckning. " +
+      "Utbyteskurser kan räknas som valbara eller valfria kurser, men det kräver ett beslut om tillgodoräknande. Kontakta studievägledningen innan du åker. " +
+      "Kurser som bara gäller dig kan du i stället lägga till som privat kurs i kursväljaren.",
+    sort: 5,
+    courseIds: [],
+  },
 ];
 
 const uu = (code) => `https://www.uu.se/utbildning/kurs?query=${code}`;

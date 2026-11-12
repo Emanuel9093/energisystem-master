@@ -98,7 +98,10 @@ function normalizeCourse(c, seed) {
 
 const SEED = () => {
   const list = [...COURSES.map(fromStudyPlan), ...SEED_EXTRA_COURSES.map((c) => normalizeCourse({ ...c }, null))];
-  for (const c of list) if (c.thick === undefined) c.thick = false;
+  for (const c of list) {
+    if (c.thick === undefined) c.thick = false;
+    if (c.summer && !c.folders.includes("sommarkurser")) c.folders.push("sommarkurser");
+  }
   // Kurser som finns i flera mappar från början
   for (const f of SEED_FOLDERS) for (const id of f.courseIds || []) {
     const c = list.find((x) => x.id === id);
