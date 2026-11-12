@@ -22,6 +22,10 @@ alter table public.plans drop column if exists visible;
 
 alter table public.plans enable row level security;
 
+-- En plan får inte bli hur stor som helst (alla ESare laddar ner varandras planer)
+alter table public.plans drop constraint if exists plans_size;
+alter table public.plans add constraint plans_size check (pg_column_size(plan) < 200000);
+
 -- Direkt läsning: bara den egna planen. Klasskompisarnas planer hämtas via
 -- classmate_plans() nedan, som tar bort avklarade kurser för den som valt att dölja dem.
 drop policy if exists "Läs egen och synliga planer" on public.plans;

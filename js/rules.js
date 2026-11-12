@@ -52,11 +52,11 @@ function dedupe(list) {
     }
     kept.push(c);
   }
-  const codes = new Map(kept.map((c) => [c.code, c]));
+  const codes = new Map(kept.map((c) => [c.id ?? c.code, c]));
   for (const [a, b] of EXCLUSIVE_PAIRS) {
     if (codes.has(a) && codes.has(b)) {
       conflicts.push([codes.get(a), codes.get(b)]);
-      kept = kept.filter((c) => c.code !== b);
+      kept = kept.filter((c) => (c.id ?? c.code) !== b);
       codes.delete(b);
     }
   }
@@ -86,12 +86,12 @@ export function evaluate(plan, statuses = ["done", "ongoing", "planned"]) {
       if (groupsDone.has(c.oneOf)) continue;
       groupsDone.add(c.oneOf);
       const alts = studyPlan.filter((x) => x.oneOf === c.oneOf);
-      if (!alts.some((a) => codes.has(a.code))) {
+      if (!alts.some((a) => codes.has(a.id))) {
         const uuSlu = alts.every((a) => a.name.replace(" (SLU)", "") === c.name.replace(" (SLU)", ""));
         const name = uuSlu ? c.name.replace(" (SLU)", "") + " (UU eller SLU)" : `${c.name} (eller ${alts.filter((a) => a !== c).map((a) => a.name).join(", ")})`;
         missing.push({ ...c, name });
       }
-    } else if (!codes.has(c.code)) {
+    } else if (!codes.has(c.id)) {
       missing.push(c);
     }
   }
@@ -138,7 +138,7 @@ export function evaluate(plan, statuses = ["done", "ongoing", "planned"]) {
     warnings.push(`Du har ${outside} hp kurser utanför studieplanen. Normalt får högst 30 hp valfria kurser ingå i examen.`);
   }
   for (const [a, b] of conflicts) {
-    warnings.push(`${a.name} (${a.code}) och ${b.name} (${b.code}) kan inte båda räknas in i examen. Bara den första räknas.`);
+    warnings.push(`${a.name} (${a.code}) och ${b.name} (${b.code}) kan inte båda räknas in i examen. Bara ${a.name} räknas.`);
   }
   // En examen på 300–304.5 hp är okej. Först vid 305 hp ingår kurser som inte behövs.
   if (total >= 305) {

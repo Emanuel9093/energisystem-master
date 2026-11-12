@@ -141,7 +141,7 @@ export function buildPool(courseRows = [], folderRows = []) {
     const data = r.data && typeof r.data === "object" ? r.data : {};
     const arrays = ["areas", "offerings", "folders"];
     const editable = Object.fromEntries(EDITABLE
-      .filter((k) => k in data && data[k] != null && (!arrays.includes(k) || Array.isArray(data[k])) && (k !== "req" || typeof data[k] === "object"))
+      .filter((k) => k in data && (data[k] != null || k === "year") && (!arrays.includes(k) || Array.isArray(data[k])) && (k !== "req" || typeof data[k] === "object"))
       .map((k) => [k, data[k]]));
     if (base) pool.overridden.add(r.id);
     byId[r.id] = normalizeCourse({ ...(base || {}), ...editable, thick: base ? base.thick : data.thick, id: r.id, updated_by: r.updated_by, updated_at: r.updated_at }, base);
@@ -165,15 +165,24 @@ export function buildPool(courseRows = [], folderRows = []) {
 }
 
 export const courseById = (id) => pool.byId[id];
-export const coursesIn = (folderId) => pool.courses.filter((c) => c.folders.includes(folderId));
+// Mappen Sommarkurser innehåller alla kurser som är markerade som sommarkurs.
+export const coursesIn = (folderId) => pool.courses.filter((c) => c.folders.includes(folderId) || (folderId === "sommarkurser" && c.summer));
 
 // Vad som sparas i databasen för en kurs: bara redigerbara fält, och för
 // studieplanens kurser bara det som skiljer sig från studieplanen.
+// Jämförbar form av ett fält, så att samma innehåll i annan ordning inte räknas som en ändring.
+function canon(k, v) {
+  if ((k === "areas" || k === "folders") && Array.isArray(v)) return JSON.stringify([...v].sort());
+  if (k === "offerings" && Array.isArray(v)) return JSON.stringify(v.map((o) => `${o.sem}:${o.periods.join(",")}`).sort());
+  if (k === "req" && v) return JSON.stringify({ hp: Object.fromEntries(Object.entries(v.hp || {}).sort()), c: v.c || [] });
+  return JSON.stringify(v ?? null);
+}
+
 export function courseData(c) {
   const seed = pool.seedIds.has(c.id) ? SEED().find((x) => x.id === c.id) : null;
   const out = {};
   for (const k of EDITABLE) {
-    if (seed && JSON.stringify(seed[k]) === JSON.stringify(c[k])) continue;
+    if (seed && canon(k, seed[k]) === canon(k, c[k])) continue;
     out[k] = c[k];
   }
   if (!seed) out.thick = !!c.thick;

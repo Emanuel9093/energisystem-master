@@ -31,6 +31,7 @@ function facts(it) {
     // Varianter (UU/SLU eller äldre kurs) räknas som samma kurs
     if (c.oneOf) for (const id of groupMembers(c.oneOf)) codes.add(id);
   } else if (it.code) codes.add(it.code);
+  else if (it.custom?.code) codes.add(String(it.custom.code).trim().toUpperCase());
   return { hp, areas, adv: level.startsWith("A"), tn: areas.some((a) => !NOT_TN.has(a)) || (!c && !!x.teknik), codes };
 }
 

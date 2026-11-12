@@ -88,6 +88,7 @@ async function afterLogin() {
   } catch (e) {
     return showError(e);
   }
+  if (state.summer && !state.plan.summers.includes(state.summer)) state.summer = null;
   // Nya planer: år 1–3 fylls i med de obligatoriska kurserna som klara
   if (state.plan.isNew) {
     delete state.plan.isNew;
@@ -730,6 +731,7 @@ function renderPicker() {
     const thick = h >= THICK_ROWS;
     const err = ctx.summer ? null : placementError(ctx.year, ctx.period, thick ? 0 : ctx.row, span, thick, undefined, h);
     if (err) { $("#custom-err").textContent = err; return; }
+    if (!String(f.get("name")).trim()) { $("#custom-err").textContent = "Kursen behöver ett namn."; return; }
     addItem(ctx.year, ctx.summer ? 1 : ctx.period, ctx.summer ? nextSummerRow(ctx.year) : ctx.row, {
       span, thick, ...(h === 2 ? { h } : {}), ...(ctx.summer ? { summer: true } : {}),
       custom: { name: f.get("name").trim(), code: f.get("code").trim(), hp: Number(f.get("hp")), level: f.get("level"), teknik: f.get("teknik") === "on" },
@@ -1110,7 +1112,7 @@ function renderPool() {
           </div>
         </div>
         <div class="toolbar">
-          <input type="search" id="pool-q" placeholder="Sök namn, kurskod eller behörighet" value="${esc(state.poolQuery)}">
+          <input type="search" id="pool-q" placeholder="Sök kursnamn eller kurskod" value="${esc(state.poolQuery)}">
           <select id="pool-area" aria-label="Huvudområde"><option value="">Alla huvudområden</option>${areas.map((a) => `<option ${a === state.poolArea ? "selected" : ""}>${esc(a)}</option>`).join("")}</select>
           <select id="pool-level" aria-label="Nivå"><option value="">Alla nivåer</option><option value="G" ${state.poolLevel === "G" ? "selected" : ""}>Grundnivå</option><option value="A" ${state.poolLevel === "A" ? "selected" : ""}>Avancerad nivå</option></select>
           <select id="pool-sem" aria-label="Termin"><option value="">HT och VT</option>${[["HT", "Höstterminen"], ["VT", "Vårterminen"], ["any", "Valfri period/sommar"]].map(([v, l]) => `<option value="${v}" ${state.poolSem === v ? "selected" : ""}>${l}</option>`).join("")}</select>
@@ -1258,7 +1260,9 @@ function openFolderEditor(folder) {
   $("#folder-form").onsubmit = async (ev) => {
     ev.preventDefault();
     const fd = new FormData(ev.target);
-    const f = { id: folder?.id || "m-" + uid(), name: fd.get("name").trim(), description: fd.get("description").trim(), sort: folder?.sort ?? 100 };
+    const name = fd.get("name").trim();
+    if (!name) { alert("Mappen behöver ett namn."); return; }
+    const f = { id: folder?.id || "m-" + uid(), name, description: fd.get("description").trim(), sort: folder?.sort ?? 100 };
     const row = { ...f, updated_by: editorName(), updated_at: new Date().toISOString() };
     dlg.close();
     await poolWrite(() => store.savePoolFolder(f, row.updated_by), () => {
@@ -1411,6 +1415,7 @@ function openCourseEditor(c) {
     const offerings = ["HT", "VT"].filter((s) => fd.get(s)).map((s) => ({ sem: s, periods: fd.get(s).split(",").map(Number) }));
     const areas = [...fd.getAll("areas"), ...fd.get("otherAreas").split(",").map((s) => s.trim()).filter(Boolean)];
     const code = fd.get("code").trim().toUpperCase();
+    if (!fd.get("name").trim()) { $("#course-err").textContent = "Kursen behöver ett namn."; return; }
     let id = c?.id;
     if (isNew) {
       id = code && !courseById(code) ? code : "u-" + uid();
