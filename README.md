@@ -49,3 +49,10 @@ Varje student kan bara ändra sin egen plan. Den som bockar ur "Visa mina kurser
 ## Publicera med GitHub Pages
 
 GitHub Pages fungerar gratis för publika repon (privata repon kräver GitHub Pro). I repot: **Settings → Pages → Deploy from a branch → `main` / root**.
+
+## Skydd och återställning
+
+- Kurspoolen kan ändras av alla inloggade ES-studenter, men bara namn, kod, hp, nivå, huvudområden, behörighet, länk, anteckning, perioder, rekommenderat år och mappar. Vilka kurser som är obligatoriska och hur examenskraven räknas styrs bara av koden (`js/courses.js`).
+- Varje ändring och borttagning i kurspoolen sparas i tabellen `pool_history`. Den syns bara för administratören i Supabase-panelen (**Table Editor → pool_history**). Där finns den gamla raden som JSON i `old_row` om något behöver återställas.
+- "Ändrad av" sätts av databasen och kan inte förfalskas.
+- Betygen ligger i en egen tabell som bara ägaren kan läsa.

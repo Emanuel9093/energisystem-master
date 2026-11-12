@@ -119,3 +119,72 @@ create policy "Egna betyg" on public.grades
   for all to authenticated
   using (user_id = auth.uid())
   with check (user_id = auth.uid());
+
+-- ---------- Skydd för kurspoolen ----------
+-- "Ändrad av" sätts av databasen (namnet i ens plan, annars e-post) så att ingen kan låtsas vara någon annan.
+create or replace function public.pool_set_editor()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  new.updated_by := coalesce(
+    nullif((select name from public.plans where user_id = auth.uid()), ''),
+    auth.jwt() ->> 'email',
+    ''
+  );
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+drop trigger if exists pool_courses_editor on public.pool_courses;
+create trigger pool_courses_editor before insert or update on public.pool_courses
+  for each row execute function public.pool_set_editor();
+drop trigger if exists pool_folders_editor on public.pool_folders;
+create trigger pool_folders_editor before insert or update on public.pool_folders
+  for each row execute function public.pool_set_editor();
+
+-- Begränsa storleken på en kurs
+alter table public.pool_courses drop constraint if exists pool_courses_data_size;
+alter table public.pool_courses add constraint pool_courses_data_size check (pg_column_size(data) < 8000);
+
+-- Historik: varje ändring och borttagning sparas, så att klotter kan återställas.
+create table if not exists public.pool_history (
+  id         bigint generated always as identity primary key,
+  table_name text not null,
+  row_id     text not null,
+  action     text not null,
+  old_row    jsonb,
+  new_row    jsonb,
+  changed_by text not null default coalesce(auth.jwt() ->> 'email', ''),
+  changed_at timestamptz not null default now()
+);
+alter table public.pool_history enable row level security;
+-- Ingen policy: historiken kan bara läsas av administratören i Supabase-panelen.
+
+create or replace function public.pool_log()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if tg_op = 'DELETE' then
+    insert into public.pool_history (table_name, row_id, action, old_row, new_row)
+    values (tg_table_name, old.id, tg_op, to_jsonb(old), null);
+    return old;
+  end if;
+  insert into public.pool_history (table_name, row_id, action, old_row, new_row)
+  values (tg_table_name, new.id, tg_op, case when tg_op = 'UPDATE' then to_jsonb(old) end, to_jsonb(new));
+  return new;
+end;
+$$;
+
+drop trigger if exists pool_courses_log on public.pool_courses;
+create trigger pool_courses_log after insert or update or delete on public.pool_courses
+  for each row execute function public.pool_log();
+drop trigger if exists pool_folders_log on public.pool_folders;
+create trigger pool_folders_log after insert or update or delete on public.pool_folders
+  for each row execute function public.pool_log();

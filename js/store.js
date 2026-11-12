@@ -7,7 +7,41 @@ export const DEMO = !SUPABASE_URL || !SUPABASE_ANON_KEY;
 
 export const emptyPlan = () => ({ name: "", start_year: null, visible: true, rows: { 1: 3, 2: 3, 3: 3, 4: 3, 5: 3 }, items: [] });
 
-const normalize = (p) => ({ ...emptyPlan(), ...p, rows: { ...emptyPlan().rows, ...(p.rows || {}) }, items: Array.isArray(p.items) ? p.items : [] });
+const STATUS_OK = new Set(["planned", "ongoing", "done"]);
+const int = (v, lo, hi, d) => { const n = Number(v); return Number.isInteger(n) && n >= lo && n <= hi ? n : d; };
+const txt = (v, max) => (typeof v === "string" ? v.slice(0, max) : v == null ? "" : String(v).slice(0, max));
+
+// Validerar en plan (egen eller en klasskompis) så att trasig eller elak data inte
+// kan krascha sidan eller smyga in HTML.
+function cleanItem(it) {
+  if (!it || typeof it !== "object") return null;
+  const out = {
+    id: txt(it.id, 40) || "i" + Math.random().toString(36).slice(2),
+    year: int(it.year, 1, 5, 1), period: int(it.period, 1, 4, 1), row: int(it.row, 0, 5, 0),
+    span: int(it.span, 1, 4, 1), thick: !!it.thick,
+    status: STATUS_OK.has(it.status) ? it.status : "planned",
+  };
+  if (out.period + out.span - 1 > 4) out.span = 5 - out.period;
+  if (it.code) out.code = txt(it.code, 40);
+  if (it.custom && typeof it.custom === "object") {
+    const c = it.custom;
+    out.custom = { name: txt(c.name, 160) || "Namnlös kurs", code: txt(c.code, 20), hp: Math.max(0, Math.min(60, Number(c.hp) || 0)), level: txt(c.level, 4), teknik: !!c.teknik };
+  }
+  if (it.snap && typeof it.snap === "object") {
+    out.snap = { name: txt(it.snap.name, 160), hp: Math.max(0, Math.min(60, Number(it.snap.hp) || 0)), level: txt(it.snap.level, 4), teknik: !!it.snap.teknik };
+  }
+  return out.code || out.custom ? out : null;
+}
+
+const normalize = (p) => {
+  const rows = { ...emptyPlan().rows };
+  for (const y of [1, 2, 3, 4, 5]) rows[y] = int(p.rows?.[y], 1, 6, 3);
+  return {
+    ...emptyPlan(), ...p,
+    name: txt(p.name, 80), start_year: int(p.start_year, 2010, 2040, null), visible: p.visible !== false,
+    rows, items: (Array.isArray(p.items) ? p.items : []).map(cleanItem).filter(Boolean),
+  };
+};
 
 let sb = null;
 
@@ -29,7 +63,8 @@ export async function getUser() {
 
 export async function onAuthChange(cb) {
   if (DEMO) return;
-  (await client()).auth.onAuthStateChange((_event, session) => cb(session?.user ?? null));
+  // setTimeout: Supabase-anrop direkt i callbacken kan låsa sig (supabase-js v2)
+  (await client()).auth.onAuthStateChange((_event, session) => setTimeout(() => cb(session?.user ?? null), 0));
 }
 
 export async function sendLoginLink(email) {

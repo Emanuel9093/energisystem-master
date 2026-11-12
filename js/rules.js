@@ -25,10 +25,11 @@ export function resolveCourses(plan, statuses) {
       if (seen.has(it.code)) continue; // samma kurs inlagd två gånger räknas en gång
       seen.add(it.code);
       list.push({ ...pc, code: pc.code || pc.id, status: it.status, inPlan: pc.inStudyPlan });
-    } else if (it.custom) {
-      const x = it.custom;
+    } else if (it.custom || it.snap) {
+      // Privat kurs, eller en kurs som tagits bort ur kurspoolen (räknas som kurs utanför studieplanen)
+      const x = it.custom || it.snap;
       list.push({
-        code: (x.code || "").toUpperCase(), name: x.name, hp: Number(x.hp) || 0, level: x.level,
+        code: String(x.code || it.code || "").toUpperCase(), name: x.name, hp: Number(x.hp) || 0, level: String(x.level || "G1N"),
         teknik: !!x.teknik, type: "extern", status: it.status, inPlan: false, techNat: true,
       });
     }

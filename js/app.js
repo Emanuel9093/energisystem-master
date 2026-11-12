@@ -1,7 +1,7 @@
 import { LEVELS, KNOWN_AREAS } from "./courses.js";
 import { evaluate, STATUSES } from "./rules.js";
 import { ALLOWED_EMAIL_DOMAINS } from "./config.js";
-import { pool, buildPool, courseById, coursesIn, courseData, offeringText } from "./pool.js";
+import { pool, buildPool, courseById, coursesIn, courseData, offeringText, safeUrl } from "./pool.js";
 import * as store from "./store.js";
 import { guideHTML } from "./guide.js";
 
@@ -103,7 +103,7 @@ function renderUser() {
   const el = $("#user");
   if (!state.user || store.DEMO) { el.innerHTML = ""; return; }
   el.innerHTML = `<span class="muted hide-sm">${esc(state.user.email)}</span> <button class="btn small" id="logout">Logga ut</button>`;
-  $("#logout").onclick = async () => { await store.signOut(); state.user = null; afterLogin(); };
+  $("#logout").onclick = async () => { await flushSaves(); await store.signOut(); state.user = null; afterLogin(); };
 }
 
 function renderLogin(message = "") {
@@ -144,6 +144,8 @@ function changed() {
   updateSaveState();
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
+    saveTimer = null;
+    if (!state.user) return;
     try {
       await store.saveMyPlan(state.user, state.plan);
       state.saveState = store.DEMO ? "Sparat i webbläsaren" : "Sparat";
@@ -158,17 +160,32 @@ function updateSaveState() {
   if (el) el.textContent = state.saveState;
 }
 
+// Sparar direkt om något väntar (vid utloggning eller när sidan stängs).
+async function flushSaves() {
+  const tasks = [];
+  if (saveTimer && state.user) { clearTimeout(saveTimer); saveTimer = null; tasks.push(store.saveMyPlan(state.user, state.plan)); }
+  if (gradeTimer && state.user) { clearTimeout(gradeTimer); gradeTimer = null; tasks.push(store.saveGrades(state.user, state.grades)); }
+  await Promise.allSettled(tasks);
+}
+addEventListener("pagehide", () => { flushSaves(); });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushSaves(); });
+
 let gradeTimer = null;
 function gradesChanged() {
   clearTimeout(gradeTimer);
-  gradeTimer = setTimeout(() => store.saveGrades(state.user, state.grades).catch((e) => alert("Kunde inte spara betyg: " + e.message)), 400);
+  gradeTimer = setTimeout(() => {
+    gradeTimer = null;
+    if (state.user) store.saveGrades(state.user, state.grades).catch((e) => alert("Kunde inte spara betyg: " + e.message));
+  }, 400);
 }
 
 // ---------- Hjälpfunktioner för planen ----------
 
 const itemCourse = (it) => (it.code ? courseById(it.code) : null);
-const itemName = (it) => itemCourse(it)?.name ?? it.custom?.name ?? it.code ?? "Okänd kurs";
-const itemHp = (it) => itemCourse(it)?.hp ?? (Number(it.custom?.hp) || 0);
+const itemName = (it) => itemCourse(it)?.name ?? it.custom?.name ?? (it.snap?.name ? `${it.snap.name} (borttagen ur kurspoolen)` : "Borttagen kurs");
+const itemHp = (it) => itemCourse(it)?.hp ?? (Number(it.custom?.hp ?? it.snap?.hp) || 0);
+// Kopia av kursens grunddata, så att planen fungerar även om kursen tas bort ur poolen.
+const snapOf = (c) => ({ name: c.name, hp: c.hp, level: c.level, teknik: c.teknik });
 const rowsOf = (y) => state.plan.rows[y] ?? 3;
 const yearItems = (y) => state.plan.items.filter((it) => it.year === y);
 const yearHp = (y) => yearItems(y).reduce((s, it) => s + itemHp(it), 0);
@@ -297,7 +314,7 @@ function yearCard(y) {
         ? `<div class="slot taken" style="grid-row:${r + 1};grid-column:${p}"></div>`
         : `<button class="slot" style="grid-row:${r + 1};grid-column:${p}" data-slot="${r}:${p}" aria-label="Lägg till kurs i period ${p}, rad ${r + 1}">${ICONS.plus}</button>`;
     }
-    const lockedByThick = items.some((it) => it.thick) && r < THICK_ROWS && rows <= THICK_ROWS;
+    const lockedByThick = items.some((it) => it.thick) && r < THICK_ROWS;
     cells += `<button class="row-del" style="grid-row:${r + 1};grid-column:5" data-del-row="${r}" ${rows <= 1 || lockedByThick ? "disabled" : ""} title="Ta bort rad" aria-label="Ta bort rad ${r + 1}">${ICONS.trash}</button>`;
   }
 
@@ -340,7 +357,11 @@ function yearCard(y) {
 
 function bindPlan() {
   $("#p-name").oninput = (e) => { state.plan.name = e.target.value; changed(); };
-  $("#p-year").oninput = (e) => { state.plan.start_year = e.target.value ? Number(e.target.value) : null; changed(); };
+  $("#p-year").oninput = (e) => {
+    const y = Number(e.target.value);
+    state.plan.start_year = Number.isInteger(y) && y >= 2010 && y <= 2040 ? y : null;
+    changed();
+  };
   $("#p-visible").onchange = (e) => { state.plan.visible = e.target.checked; changed(); };
 
   app.onclick = (ev) => {
@@ -418,7 +439,7 @@ function fillMandatory(y, status, silent = false) {
   for (const { c, period, span } of list) {
     if (c.thick) {
       if (placementError(y, period, 0, span, true)) skipped.push(c.name);
-      else addItem(y, period, 0, { code: c.id, span, thick: true }, status);
+      else addItem(y, period, 0, { code: c.id, span, thick: true, snap: snapOf(c) }, status);
       continue;
     }
     let row = [...Array(rowsOf(y)).keys()].find((r) => !placementError(y, period, r, span, false));
@@ -427,7 +448,7 @@ function fillMandatory(y, status, silent = false) {
       state.plan.rows[y] = rowsOf(y) + 1;
       row = rowsOf(y) - 1;
     }
-    addItem(y, period, row, { code: c.id, span, thick: false }, status);
+    addItem(y, period, row, { code: c.id, span, thick: false, snap: snapOf(c) }, status);
   }
   if (skipped.length && !silent) alert(`Fick inte plats med: ${skipped.join(", ")}. Flytta eller ta bort kurser och försök igen.`);
 }
@@ -475,15 +496,15 @@ function pickEntry(c, ctx) {
   const slot = slotFor(c, ctx, replaces?.year === ctx.year ? replaces.id : undefined);
   const err = placed ? `Redan inlagd i år ${placed.year}` : slot.err;
   const mates = matesFor(c.id).length;
-  const where = slot.err ? "" : `Hamnar i period ${slot.start}${slot.span > 1 ? "–" + (slot.start + slot.span - 1) : ""}`;
+  const where = slot.err ? "" : `Hamnar i period ${Number(slot.start)}${slot.span > 1 ? "–" + (Number(slot.start) + Number(slot.span) - 1) : ""}`;
   return `
     <button class="pick" data-pick="${esc(c.id)}" ${err ? "disabled" : ""}>
       <span class="pick-main">
         <span class="pick-name">${esc(c.name)}</span>
         <span class="course-meta">
           ${courseTags(c)}
-          <span>Ges ${offeringText(c).join(", ")}</span>
-          ${c.year ? `<span>Rek. år ${c.year}</span>` : ""}
+          <span>Ges ${esc(offeringText(c).join(", "))}</span>
+          ${c.year ? `<span>Rek. år ${esc(c.year)}</span>` : ""}
           ${c.thick ? `<span class="tag">Tar alla tre rader</span>` : ""}
           ${mates ? `<span class="tag mates">${plural(mates, "klasskompis", "klasskompisar")}</span>` : ""}
         </span>
@@ -582,7 +603,7 @@ dlg.addEventListener("click", (ev) => {
     const slot = slotFor(c, ctx, replaces?.year === ctx.year ? replaces.id : undefined);
     if (slot.err) { alert(slot.err); return; }
     if (replaces) state.plan.items = state.plan.items.filter((x) => x !== replaces);
-    addItem(ctx.year, slot.start, slot.row, { code: c.id, span: slot.span, thick: !!c.thick });
+    addItem(ctx.year, slot.start, slot.row, { code: c.id, span: slot.span, thick: !!c.thick, snap: snapOf(c) }, replaces?.status || "planned");
     dlg.close();
     renderPlan();
     return;
@@ -598,7 +619,14 @@ dlg.addEventListener("click", (ev) => {
   const sw = ev.target.closest("[data-swap]");
   if (sw) {
     const it = state.plan.items.find((x) => x.id === sw.dataset.id);
-    it.code = sw.dataset.swap;
+    const alt = courseById(sw.dataset.swap);
+    const altOff = alt?.offerings.find((o) => o.periods[0] === it.period && o.periods.length === it.span);
+    if (!alt || placedWhere(alt.id) || (!altOff && !alt.anyPeriod) || !!alt.thick !== !!it.thick) {
+      alert("Varianten går inte att byta till på samma plats. Ta bort kursen och välj den andra varianten i kursväljaren.");
+      return;
+    }
+    it.code = alt.id;
+    it.snap = snapOf(alt);
     changed();
     renderPlan();
     return openItem(it.id);
@@ -626,7 +654,7 @@ function openItem(id) {
   if (!it) return;
   state.picker = null;
   const c = itemCourse(it);
-  const x = it.custom || {};
+  const x = it.custom || it.snap || {};
   const mates = c ? matesFor(c.id) : [];
   const periods = Array.from({ length: it.span }, (_, i) => it.period + i).join("–");
   openDialog(`
@@ -639,7 +667,7 @@ function openItem(id) {
     </div>
     <div class="course-meta">
       ${c ? `${courseTags(c)}${c.areas.map((a) => `<span class="tag">${esc(a)}</span>`).join("")}`
-      : `${x.code ? `<span>${esc(x.code)}</span>` : ""}<span>${Number(x.hp) || 0} hp</span><span class="tag">${esc(x.level)}</span>${x.teknik ? `<span class="tag">Teknik</span>` : ""}<span class="tag">Privat kurs</span>`}
+      : `${x.code ? `<span>${esc(x.code)}</span>` : ""}<span>${Number(x.hp) || 0} hp</span><span class="tag">${esc(x.level)}</span>${x.teknik ? `<span class="tag">Teknik</span>` : ""}<span class="tag">${it.custom ? "Privat kurs" : "Borttagen ur kurspoolen"}</span>`}
     </div>
     ${c?.prereq ? `<p class="small"><strong>Behörighet:</strong> ${esc(c.prereq)}</p>` : ""}
     ${c?.note ? `<p class="small muted">${esc(c.note)}</p>` : ""}
@@ -708,9 +736,9 @@ function renderReqs() {
 const folderHp = (id) => coursesIn(id).reduce((s, c) => s + c.hp, 0);
 
 function renderPool() {
+  if (state.poolFolder !== "all" && !pool.folders.some((f) => f.id === state.poolFolder)) state.poolFolder = "programplanen";
   const fid = state.poolFolder;
   const folder = pool.folders.find((f) => f.id === fid);
-  if (fid !== "all" && !folder) state.poolFolder = "programplanen";
   const q = state.poolQuery.trim().toLowerCase();
   let list = fid === "all" ? pool.courses : coursesIn(fid);
   list = list.filter((c) =>
@@ -782,9 +810,9 @@ function poolCourseCard(c) {
         <div class="pc-prereq"><strong>Behörighet</strong><p>${c.prereq ? esc(c.prereq) : `<span class="muted">Inte ifyllt ännu. Klicka på Ändra och lägg till.</span>`}</p></div>
         ${c.note ? `<p class="small muted">${esc(c.note)}</p>` : ""}
         <div class="course-meta">
-          ${c.year ? `<span>Rekommenderat år ${c.year}</span>` : ""}
+          ${c.year ? `<span>Rekommenderat år ${esc(c.year)}</span>` : ""}
           ${folders.map((f) => `<span class="tag">${ICONS.folder} ${esc(f.name)}</span>`).join("")}
-          ${c.url ? `<a href="${esc(c.url)}" target="_blank" rel="noopener">Kurssida ↗</a>` : ""}
+          ${safeUrl(c.url) ? `<a href="${esc(safeUrl(c.url))}" target="_blank" rel="noopener noreferrer">Kurssida ↗</a>` : ""}
           ${c.updated_by ? `<span>Ändrad av ${esc(c.updated_by)}</span>` : ""}
         </div>
         <div class="toolbar">
@@ -831,7 +859,9 @@ function bindPool() {
     const e4 = t.closest("[data-delete-course]");
     if (e4) {
       const c = courseById(e4.dataset.deleteCourse);
-      if (!confirm(`Ta bort ${c.name} ur kurspoolen för alla?`)) return;
+      const users = matesFor(c.id).length + (placedWhere(c.id) ? 1 : 0);
+      const warn = users ? `\n\n${users} student${users > 1 ? "er" : ""} har kursen i sin plan. Den finns kvar där men går inte längre att välja.` : "";
+      if (!confirm(`Ta bort ${c.name} ur kurspoolen för alla?${warn}`)) return;
       await poolWrite(() => store.deletePoolCourse(c.id), () => {
         state.poolRows.courseRows = state.poolRows.courseRows.filter((r) => r.id !== c.id);
       });
@@ -980,7 +1010,7 @@ function openCourseEditor(c) {
       ...cur, id, code, name: fd.get("name").trim(), hp: Number(fd.get("hp")), level: fd.get("level"),
       year: fd.get("year") ? Number(fd.get("year")) : null, offerings,
       anyPeriod: fd.get("anyPeriod") === "on", summer: fd.get("summer") === "on",
-      areas: [...new Set(areas)], prereq: fd.get("prereq").trim(), url: fd.get("url").trim(), note: fd.get("note").trim(),
+      areas: [...new Set(areas)], prereq: fd.get("prereq").trim(), url: safeUrl(fd.get("url").trim()), note: fd.get("note").trim(),
       folders: fd.getAll("folders"),
     };
     if (!offerings.length && !next.anyPeriod && !next.summer) {
@@ -1070,9 +1100,12 @@ function renderGrades() {
 
 // ---------- Klasskompisar ----------
 
+const okStatus = (s) => (STATUSES[s] ? s : "planned");
+
 function personChip(m, status, me = false) {
-  return `<span class="person ${me ? "me" : ""}" title="${esc(STATUSES[status] || "")}">
-    <span class="avatar">${esc(me ? "Du" : initials(m.name))}</span>${esc(me ? "Du" : m.name)}<span class="dot ${status}"></span></span>`;
+  const st = okStatus(status);
+  return `<span class="person ${me ? "me" : ""}" title="${esc(STATUSES[st])}">
+    <span class="avatar">${esc(initials(me ? state.plan.name || "Du" : m.name))}</span>${esc(me ? "Du" : m.name)}<span class="dot ${st}"></span></span>`;
 }
 
 function renderMates() {
@@ -1083,7 +1116,7 @@ function renderMates() {
 
   const courseList = f === "valbara"
     ? pool.courses.filter((c) => !(c.inStudyPlan && c.type === "obl" && (c.year ?? 9) <= 3))
-    : f === "custom" ? [] : coursesIn(f);
+    : f === "custom" ? [] : coursesIn(f).filter((c) => !(c.inStudyPlan && c.type === "obl" && (c.year ?? 9) <= 3));
 
   const items = [];
   for (const c of courseList) {
@@ -1126,7 +1159,7 @@ function renderMates() {
         <div class="card person-card">
           <h3><span class="avatar">${esc(initials(m.name))}</span>${esc(m.name)}</h3>
           <div class="muted small">${m.start_year ? `Började ${m.start_year}` : ""}</div>
-          ${list.length ? `<ul>${list.map((x) => `<li><span class="dot ${x.status}" title="${STATUSES[x.status]}"></span>${esc(x.name)}<span class="muted">${esc(x.meta)}</span></li>`).join("")}</ul>` : `<p class="muted small">Inga valbara kurser inlagda.</p>`}
+          ${list.length ? `<ul>${list.map((x) => `<li><span class="dot ${okStatus(x.status)}" title="${esc(STATUSES[okStatus(x.status)])}"></span>${esc(x.name)}<span class="muted">${esc(x.meta)}</span></li>`).join("")}</ul>` : `<p class="muted small">Inga valbara kurser inlagda.</p>`}
         </div>`;
     }).join("");
 
