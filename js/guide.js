@@ -74,7 +74,8 @@ export function guideHTML() {
         <ul class="tips">
           <li>Varje år har fyra läsperioder: HT är period 1–2 och VT är period 3–4.</li>
           <li>Tre rader motsvarar normal studietakt (15 hp per period). Läser du utökat klickar du på <em>Lägg till rad</em>.</li>
-          <li>Kurser som går över två perioder blir långa. Självständigt arbete och examensarbete tar alla tre rader.</li>
+          <li>Kurser som går över två perioder blir långa. Kurser i högre studietakt blir höga: en rad motsvarar 5 hp per period, så Tidsserieanalys (10 hp i en period) tar två rader och självständigt arbete och examensarbete tar alla tre. Kurser under 10 hp tar alltid en rad.</li>
+          <li>Under <em>Hp per huvudområde</em> i panelen till höger ser du hur många hp du har i teknik, matematik, fysik och andra ämnen.</li>
           <li><strong>Behörighet:</strong> planerade kurser får en <span class="lamp-demo missing"></span> röd lampa om du inte är behörig enligt din plan och en <span class="lamp-demo pending"></span> gul lampa om du blir behörig när dina planerade kurser är klara. Klicka på kursen för att se vad som saknas. Sidan räknar bara hp (totalt, per huvudområde och på avancerad nivå) och vilka kurser du har läst före kursen. Krav som Engelska 6 kontrolleras inte. Har du tillgodoräknat något kan du bocka i <em>Jag är behörig ändå</em>.</li>
           <li><strong>Sommarkurser:</strong> klicka på plustecknet mellan två år för att lägga till en sommar. Sommaren har en enda period och visas som en lista. Sommarkurser kan bara läggas på en sommar.</li>
           <li>Papperskorgen till höger tar bort en rad. Knapparna under rutnätet fyller i årets obligatoriska kurser, markerar hela året som klart eller tömmer året.</li>

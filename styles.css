@@ -488,7 +488,7 @@ legend { font-size: 13px; font-weight: 700; color: var(--accent); padding: 0 4px
   .year-tabs { gap: 3px; } .year-tabs .add-summer { flex-basis: 18px; } .year-tabs button { padding: 8px 2px; } .year-tabs button small { font-size: 10.5px; }
   .year-tabs .sum-full { display: none; } .year-tabs .sum-short { display: inline; }
 }
-.summer-list { display: flex; flex-direction: column; gap: 8px; }
+.summer-list { display: flex; flex-direction: column; gap: 12px; }
 .summer-list .pill { margin: 0; min-height: 44px; position: relative; }
 .summer-list .summer-add {
   position: static; border-left: 2px dashed var(--border); min-height: 44px; border: 2px dashed var(--border); border-radius: 12px; color: var(--accent);
@@ -545,16 +545,12 @@ button.person:hover { background: var(--accent-soft); outline: 1px solid var(--e
 
 /* Behörighetslampor */
 .pill { position: relative; }
-.lamp {
-  position: absolute; top: -2px; right: -2px; width: 13px; height: 13px; border-radius: 50%;
-  border: 2px solid var(--surface); z-index: 2;
-}
 .lamp.missing { background: #d93a2b; box-shadow: 0 0 6px rgb(217 58 43 / 0.7); }
 .lamp.pending { background: #f2b705; box-shadow: 0 0 6px rgb(242 183 5 / 0.7); }
 .pick-elig { display: flex; align-items: center; gap: 6px; font-size: 12.5px; margin-top: 3px; }
 .pick-elig.missing { color: var(--bad); }
 .pick-elig.pending { color: var(--warn); }
-.pick-elig .lamp, .elig-box .lamp { position: static; display: inline-block; width: 10px; height: 10px; border: 0; flex: none; vertical-align: 0; }
+.lamp { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex: none; vertical-align: 0; }
 .elig-box { border-radius: 12px; padding: 10px 12px; margin: 10px 0; background: var(--surface-2); font-size: 14px; }
 .elig-box.missing { background: var(--bad-soft); }
 .elig-box.pending { background: var(--warn-soft); }
@@ -569,3 +565,30 @@ button.person:hover { background: var(--accent-soft); outline: 1px solid var(--e
 .lamp-demo { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: 0; }
 .lamp-demo.missing { background: #d93a2b; }
 .lamp-demo.pending { background: #f2b705; }
+
+.lamp-tag {
+  position: absolute; top: -9px; right: 12px; z-index: 2; display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10.5px; font-weight: 800; line-height: 1; padding: 2px 7px 2px 4px; border-radius: 999px;
+  background: var(--surface); border: 1.5px solid currentColor; white-space: nowrap;
+}
+.lamp-tag i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.lamp-tag.missing { color: #c0392b; }
+.lamp-tag.missing i { background: #d93a2b; box-shadow: 0 0 5px rgb(217 58 43 / 0.8); }
+.lamp-tag.pending { color: #9a6b00; }
+.lamp-tag.pending i { background: #f2b705; box-shadow: 0 0 5px rgb(242 183 5 / 0.8); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .lamp-tag.missing { color: #ff8a7a; }
+  :root:not([data-theme="light"]) .lamp-tag.pending { color: #f5c842; }
+}
+.pill.tall .pill-name { -webkit-line-clamp: 4; }
+
+/* Hp per huvudområde i sidopanelen */
+.area-panel { margin: 12px 0 6px; border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; }
+.area-panel summary { cursor: pointer; font-weight: 800; color: var(--accent); }
+.area-panel table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13.5px; }
+.area-panel th { white-space: nowrap; text-align: right; font-size: 11.5px; color: var(--muted); font-weight: 700; padding: 0 0 4px; }
+.area-panel th:first-child, .area-panel td:first-child { text-align: left; }
+.area-panel td { text-align: right; padding: 4px 0 4px 10px; border-top: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.area-panel tr.main td { font-weight: 800; font-size: 14.5px; }
+.area-panel tr.adv td { border-bottom: 2px solid var(--border); }
+.area-panel p { margin: 8px 0 0; }

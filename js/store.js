@@ -24,8 +24,10 @@ function cleanItem(it) {
     status: STATUS_OK.has(it.status) ? it.status : "planned",
   };
   if (out.period + out.span - 1 > 4) out.span = 5 - out.period;
+  if (!out.thick && int(it.h, 2, 2, 0)) out.h = 2; // kurs som tar två rader (högre studietakt)
   // Sommarkurs: sommaren efter år `year`, en enda period, `row` är ordningen i listan.
   if (it.summer) Object.assign(out, { summer: true, year: int(it.year, 1, 4, 1), period: 1, span: 1, thick: false, row: int(it.row, 0, 99, 0) });
+  if (out.summer) delete out.h;
   if (it.code) out.code = txt(it.code, 40);
   if (it.eligOk) out.eligOk = true; // "Jag är behörig ändå"
   if (it.custom && typeof it.custom === "object") {

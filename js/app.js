@@ -195,9 +195,23 @@ const periodText = (it) => (it.summer ? "sommar" : `P${it.period}${it.span > 1 ?
 const whenText = (it) => (it.summer ? `Sommaren efter år ${it.year}` : `År ${it.year} · ${periodText(it)}`);
 const yearHp = (y) => yearItems(y).reduce((s, it) => s + itemHp(it), 0);
 const thickRowsOf = (y) => Math.min(THICK_ROWS, rowsOf(y));
+// Antal rader en kurs tar = studietakt. En rad är 5 hp per period (normal takt är 3 rader).
+// Kurser under 10 hp tar alltid en rad. 3 rader = "tjock" kurs som fyller hela perioden.
+function heightFor(c, span) {
+  if (c.thick) return THICK_ROWS;
+  const hp = Number(c.hp) || 0;
+  if (hp < 10) return 1;
+  return Math.max(1, Math.min(THICK_ROWS, Math.round(hp / (span * 5))));
+}
+// Fält för ett nytt objekt i planen utifrån kursens höjd
+const sizeFields = (c, span) => {
+  const h = heightFor(c, span);
+  return h >= THICK_ROWS ? { thick: true } : { thick: false, ...(h > 1 ? { h } : {}) };
+};
+const itemH = (it) => (it.thick ? thickRowsOf(it.year) : it.h || 1);
 
 function cellsOf(it) {
-  const rows = it.thick ? [...Array(thickRowsOf(it.year)).keys()] : [it.row];
+  const rows = it.thick ? [...Array(thickRowsOf(it.year)).keys()] : [...Array(it.h || 1).keys()].map((i) => it.row + i);
   const cells = [];
   for (const r of rows) for (let p = it.period; p < it.period + it.span; p++) cells.push(`${r}:${p}`);
   return cells;
@@ -209,10 +223,11 @@ function occupied(y, ignoreId) {
   return map;
 }
 
-function placementError(y, period, row, span, thick, ignoreId) {
+function placementError(y, period, row, span, thick, ignoreId, h = 1) {
   if (period + span - 1 > 4) return `Kursen går över ${span} perioder och får inte plats från period ${period}.`;
+  if (!thick && row + h > rowsOf(y)) return `Kursen tar ${h} rader (högre studietakt) och får inte plats från rad ${row + 1}.`;
   const occ = occupied(y, ignoreId);
-  const rows = thick ? [...Array(thickRowsOf(y)).keys()] : [row];
+  const rows = thick ? [...Array(thickRowsOf(y)).keys()] : [...Array(h).keys()].map((i) => row + i);
   for (const r of rows) for (let p = period; p < period + span; p++) {
     const other = occ.get(`${r}:${p}`);
     if (other) return `Platsen är upptagen av ${itemName(other)} (period ${p}).`;
@@ -359,12 +374,12 @@ function yearCard(y) {
   }
 
   const pills = items.map((it) => {
-    const rowSpan = it.thick ? thickRowsOf(y) : 1;
+    const rowSpan = itemH(it);
     const e = eligOf(it);
     const icon = it.status === "done" ? ICONS.lock : it.status === "ongoing" ? ICONS.clock : "";
     const name = itemName(it);
     return `
-      <button class="pill ${it.status} ${it.thick ? "thick" : ""}" data-item="${esc(it.id)}"
+      <button class="pill ${it.status} ${it.thick ? "thick" : rowSpan > 1 ? "tall" : ""}" data-item="${esc(it.id)}"
         style="grid-row:${(it.thick ? 0 : it.row) + 1} / span ${rowSpan};grid-column:${it.period} / span ${it.span}"
         title="${esc(name)} – ${STATUSES[it.status]}${offPeriod(it) ? ". " + esc(offNote(it)) : ""}${esc(eligTitle(e))}">
         ${lamp(e)}${offPeriod(it) ? WARN : icon}<span class="pill-name">${esc(name)}</span><span class="hp">${itemHp(it)} hp</span>
@@ -472,7 +487,7 @@ function selectSummer(n) {
 }
 
 function deleteRow(y, r) {
-  const victims = yearItems(y).filter((it) => !it.thick && it.row === r);
+  const victims = yearItems(y).filter((it) => !it.thick && it.row <= r && r < it.row + (it.h || 1));
   if (victims.length && !confirm(`Raden innehåller ${victims.map(itemName).join(", ")}. Ta bort raden och kurserna?`)) return;
   state.plan.items = state.plan.items.filter((it) => !victims.includes(it));
   for (const it of yearItems(y)) if (!it.thick && it.row > r) it.row--;
@@ -516,7 +531,7 @@ function fillMandatory(y, status, silent = false) {
       state.plan.rows[y] = rowsOf(y) + 1;
       row = rowsOf(y) - 1;
     }
-    addItem(y, period, row, { code: c.id, span, thick: false, snap: snapOf(c) }, status);
+    addItem(y, period, row, { code: c.id, span, thick: false, snap: snapOf(c), ...sizeFields(c, span) }, status);
   }
   if (skipped.length && !silent) alert(`Fick inte plats med: ${skipped.join(", ")}. Flytta eller ta bort kurser och försök igen.`);
 }
@@ -555,11 +570,13 @@ function slotFor(c, ctx, ignoreId, force = false) {
   else if (force) { start = ctx.period; span = Math.min(c.offerings[0]?.periods.length || 1, 5 - ctx.period); }
   else if (c.summer) return { err: "Sommarkurs. Ges bara på sommaren (plustecknet mellan två år).", offErr: true };
   else return { err: `Ges inte i period ${ctx.period} (ges ${offeringText(c).join(", ")}).`, offErr: true };
-  if (c.thick) return { start, span, row: 0, err: placementError(ctx.year, start, 0, span, true, ignoreId) };
+  const size = sizeFields(c, span);
+  if (size.thick) return { start, span, row: 0, size, err: placementError(ctx.year, start, 0, span, true, ignoreId) };
+  const h = size.h || 1;
   const rows = [ctx.row, ...[...Array(rowsOf(ctx.year)).keys()].filter((r) => r !== ctx.row)];
-  const row = rows.find((r) => !placementError(ctx.year, start, r, span, false, ignoreId));
-  if (row === undefined) return { err: placementError(ctx.year, start, ctx.row, span, false, ignoreId) + " Lägg till en rad eller ta bort en kurs." };
-  return { start, span, row, err: null };
+  const row = rows.find((r) => !placementError(ctx.year, start, r, span, false, ignoreId, h));
+  if (row === undefined) return { err: placementError(ctx.year, start, Math.min(ctx.row, Math.max(0, rowsOf(ctx.year) - h)), span, false, ignoreId, h) + " Lägg till en rad eller ta bort en kurs." };
+  return { start, span, row, size, err: null };
 }
 
 // Kurs i samma "en av"-grupp (t.ex. examensarbete UU/SLU) som redan finns i planen.
@@ -574,7 +591,7 @@ function pickEntry(c, ctx) {
   const mates = matesFor(c.id).length;
   const probe = !err && !off && !slot.err ? eligibility(state.plan, { id: "probe", code: c.id, year: ctx.year, period: slot.start, span: slot.span, summer: !!ctx.summer, status: "planned" }) : null;
   const eligNote = probe && probe.state !== "ok"
-    ? `<span class="pick-elig ${probe.state}">${lamp(probe)}${ELIG_TEXT[probe.state]}: ${esc(probe.items.filter((i) => i.state !== "ok").map((i) => i.text).join(", "))}</span>` : "";
+    ? `<span class="pick-elig ${probe.state}">${lamp(probe, true)}${ELIG_TEXT[probe.state]}: ${esc(probe.items.filter((i) => i.state !== "ok").map((i) => i.text).join(", "))}</span>` : "";
   const where = slot.err ? "" : ctx.summer ? "Hamnar på sommaren" : `Hamnar i period ${Number(slot.start)}${slot.span > 1 ? "–" + (Number(slot.start) + Number(slot.span) - 1) : ""}`;
   return `
     <button class="pick ${off ? "off" : ""}" data-pick="${esc(c.id)}" ${off ? 'data-off="1"' : ""} ${err ? "disabled" : ""}>
@@ -584,7 +601,7 @@ function pickEntry(c, ctx) {
           ${courseTags(c)}
           <span>Ges ${esc(offeringText(c).join(", "))}</span>
           ${c.year ? `<span>Rek. år ${esc(c.year)}</span>` : ""}
-          ${c.thick ? `<span class="tag">Tar alla tre rader</span>` : ""}
+          ${!ctx.summer && !slot.err && slot.size?.thick ? `<span class="tag">Tar alla tre rader</span>` : !ctx.summer && !slot.err && slot.size?.h > 1 ? `<span class="tag">Tar ${slot.size.h} rader</span>` : ""}
           ${mates ? `<span class="tag mates">${plural(mates, "ESare", "ESare")}</span>` : ""}
         </span>
         ${err ? `<span class="pick-err">${esc(err)}</span>`
@@ -643,7 +660,7 @@ function renderPicker() {
         <label class="field">Nivå<select name="level">${LEVELS.map((l) => `<option ${l === "A1N" ? "selected" : ""}>${l}</option>`).join("")}</select></label>
         ${ctx.summer ? "" : `<label class="field">Perioder<select name="span">${[1, 2, 3, 4].map((n) => `<option value="${n}">${n}</option>`).join("")}</select></label>`}
         <label class="check"><input type="checkbox" name="teknik" checked> Huvudområde teknik</label>
-        ${ctx.summer ? "" : `<label class="check"><input type="checkbox" name="thick"> Tjock (tar tre rader)</label>`}
+        ${ctx.summer ? "" : `<label class="field">Rader (studietakt)<select name="h"><option value="1">1 rad</option><option value="2">2 rader</option><option value="3">3 rader (heltid)</option></select></label>`}
         <p class="pick-err" id="custom-err"></p>
         <button class="btn primary" type="submit">Lägg till</button>
       </form>
@@ -663,11 +680,12 @@ function renderPicker() {
     ev.preventDefault();
     const f = new FormData(ev.target);
     const span = ctx.summer ? 1 : Number(f.get("span"));
-    const thick = !ctx.summer && f.get("thick") === "on";
-    const err = ctx.summer ? null : placementError(ctx.year, ctx.period, ctx.row, span, thick);
+    const h = ctx.summer ? 1 : Number(f.get("h")) || 1;
+    const thick = h >= THICK_ROWS;
+    const err = ctx.summer ? null : placementError(ctx.year, ctx.period, thick ? 0 : ctx.row, span, thick, undefined, h);
     if (err) { $("#custom-err").textContent = err; return; }
     addItem(ctx.year, ctx.summer ? 1 : ctx.period, ctx.summer ? nextSummerRow(ctx.year) : ctx.row, {
-      span, thick, ...(ctx.summer ? { summer: true } : {}),
+      span, thick, ...(h === 2 ? { h } : {}), ...(ctx.summer ? { summer: true } : {}),
       custom: { name: f.get("name").trim(), code: f.get("code").trim(), hp: Number(f.get("hp")), level: f.get("level"), teknik: f.get("teknik") === "on" },
     });
     dlg.close();
@@ -719,7 +737,10 @@ function eligOf(it) {
   return e && e.state !== "ok" ? e : null;
 }
 const ELIG_TEXT = { missing: "Du är inte behörig enligt planen", pending: "Du blir behörig när planerade kurser är klara" };
-const lamp = (e) => (e ? `<span class="lamp ${e.state}" aria-label="${ELIG_TEXT[e.state]}"></span>` : "");
+// Lampa med texten "Behörighet" i kursens hörn, eller bara en prick (dot = true) i listor.
+const lamp = (e, dot = false) => (!e ? "" : dot
+  ? `<span class="lamp ${e.state}" aria-hidden="true"></span>`
+  : `<span class="lamp-tag ${e.state}" aria-label="${ELIG_TEXT[e.state]}"><i></i>Behörighet</span>`);
 const eligTitle = (e) => (e ? `. ${ELIG_TEXT[e.state]}: ${e.items.filter((i) => i.state !== "ok").map((i) => i.text).join(", ")}` : "");
 
 // Dialogen används av kursväljaren, kursdetaljer och kurspoolens formulär.
@@ -740,7 +761,7 @@ dlg.addEventListener("click", (ev) => {
     const slot = slotFor(c, ctx, replaces?.year === ctx.year ? replaces.id : undefined, !!forced);
     if (slot.err) { alert(slot.err); return; }
     if (replaces) state.plan.items = state.plan.items.filter((x) => x !== replaces);
-    addItem(ctx.year, slot.start, slot.row, { code: c.id, span: slot.span, thick: !ctx.summer && !!c.thick, snap: snapOf(c), ...(ctx.summer ? { summer: true } : {}) }, replaces?.status || "planned");
+    addItem(ctx.year, slot.start, slot.row, { code: c.id, span: slot.span, snap: snapOf(c), ...(ctx.summer ? { summer: true, thick: false } : slot.size) }, replaces?.status || "planned");
     dlg.close();
     renderPlan();
     return;
@@ -766,7 +787,7 @@ dlg.addEventListener("click", (ev) => {
     const it = state.plan.items.find((x) => x.id === sw.dataset.id);
     const alt = courseById(sw.dataset.swap);
     const altOff = alt?.offerings.find((o) => o.periods[0] === it.period && o.periods.length === it.span);
-    const fits = it.summer ? alt?.summer : (altOff || alt?.anyPeriod) && !!alt.thick === !!it.thick;
+    const fits = it.summer ? alt?.summer : (altOff || alt?.anyPeriod) && heightFor(alt, it.span) === heightFor(itemCourse(it) || {}, it.span);
     if (!alt || placedWhere(alt.id) || !fits) {
       alert("Varianten går inte att byta till på samma plats. Ta bort kursen och välj den andra varianten i kursväljaren.");
       return;
@@ -806,7 +827,7 @@ function openItem(id) {
     <div class="dlg-head">
       <div>
         <h2>${esc(itemName(it))}</h2>
-        <p class="muted small">${esc(whenText(it))}${it.thick ? " · tar alla tre rader" : ""}</p>
+        <p class="muted small">${esc(whenText(it))}${it.thick ? " · tar alla tre rader" : it.h > 1 ? ` · tar ${it.h} rader` : ""}</p>
       </div>
       <button class="icon-btn" data-close aria-label="Stäng">✕</button>
     </div>
@@ -841,7 +862,7 @@ function eligBlock(it) {
   const head = it.eligOk ? "Du har markerat att du är behörig." : e.state === "ok" ? "Du är behörig." : ELIG_TEXT[e.state] + ".";
   return `
     <div class="elig-box ${it.eligOk ? "ok" : e.state}">
-      <strong>${it.eligOk ? "" : lamp(e.state === "ok" ? null : e)} ${esc(head)}</strong>
+      <strong>${it.eligOk ? "" : lamp(e.state === "ok" ? null : e, true)} ${esc(head)}</strong>
       <ul>${e.items.map((i) => `<li class="${i.state}"><span>${icon[i.state]}</span>${esc(i.text)}${i.detail && i.state !== "ok" ? ` <span class="muted">(${esc(i.detail)})</span>` : ""}</li>`).join("")}</ul>
       <p class="muted small">Kontrollen räknar bara hp och kurser i din plan som slutar före kursen. Krav som gymnasiekurser och Engelska 6 kontrolleras inte.</p>
       <label class="check small"><input type="checkbox" data-elig-ok="${esc(it.id)}" ${it.eligOk ? "checked" : ""}> Jag är behörig ändå (till exempel tillgodoräknat eller dispens)</label>
@@ -849,6 +870,55 @@ function eligBlock(it) {
 }
 
 // ---------- Examenskrav ----------
+
+// hp per huvudområde, klart och i hela planen (varje kurs räknas en gång)
+function areaTotals() {
+  const seen = new Set();
+  const out = new Map();
+  const add = (area, hp, done) => {
+    if (!out.has(area)) out.set(area, { done: 0, all: 0 });
+    const o = out.get(area);
+    o.all += hp;
+    if (done) o.done += hp;
+  };
+  for (const it of state.plan.items) {
+    const key = it.code || it.id;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const c = itemCourse(it);
+    const x = c || it.custom || it.snap || {};
+    const hp = itemHp(it);
+    const areas = c ? c.areas : x.teknik ? ["Teknik"] : [];
+    for (const a of areas) add(a, hp, it.status === "done");
+    if (String(x.level || "").startsWith("A")) add("Avancerad nivå", hp, it.status === "done");
+  }
+  return out;
+}
+
+function areaPanel() {
+  const t = areaTotals();
+  const main = ["Teknik", "Matematik", "Fysik"];
+  const rest = [...t.keys()].filter((a) => !main.includes(a) && a !== "Avancerad nivå").sort((a, b) => t.get(b).all - t.get(a).all);
+  const row = (a, cls = "") => {
+    const v = t.get(a) || { done: 0, all: 0 };
+    return `<tr class="${cls}"><td>${esc(a)}</td><td>${v.done}</td><td>${v.all}</td></tr>`;
+  };
+  let open = false;
+  try { open = sessionStorage.getItem("es-areas-open") === "1"; } catch { /* ignorera */ }
+  return `
+    <details class="area-panel" id="area-panel" ${open ? "open" : ""}>
+      <summary>Hp per huvudområde</summary>
+      <table>
+        <thead><tr><th>Huvudområde</th><th>Klart</th><th>I planen</th></tr></thead>
+        <tbody>
+          ${main.map((a) => row(a, "main")).join("")}
+          ${row("Avancerad nivå", "adv")}
+          ${rest.map((a) => row(a)).join("")}
+        </tbody>
+      </table>
+      <p class="muted small">En kurs kan ha flera huvudområden och räknas då till alla.</p>
+    </details>`;
+}
 
 function renderReqs() {
   const all = evaluate(state.plan, ["done", "ongoing", "planned"]);
@@ -885,11 +955,13 @@ function renderReqs() {
         <span>${shown.total} hp ${state.scope === "done" ? "klara" : "i planen"} · ${done.total} hp klara</span>
       </div>
     </div>
+    ${areaPanel()}
     ${rows}
     <div class="legend"><span><i style="background:var(--ok)"></i>Klart</span><span><i style="background:var(--accent);opacity:.35"></i>Läser/planerat</span></div>
     ${shown.warnings.length ? `<div class="warnings">${shown.warnings.map((w) => `<div>${esc(w)}</div>`).join("")}</div>` : ""}
     <p class="save-state" id="save-state">${esc(state.saveState)}</p>`;
 
+  $("#area-panel").addEventListener("toggle", (e) => { try { sessionStorage.setItem("es-areas-open", e.target.open ? "1" : ""); } catch { /* ignorera */ } });
   $("#reqs").querySelectorAll("[data-scope]").forEach((b) => (b.onclick = (ev) => { ev.stopPropagation(); state.scope = b.dataset.scope; renderReqs(); }));
 }
 
