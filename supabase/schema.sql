@@ -2,10 +2,6 @@
 -- Vem som helst kan skapa ett konto med e-post och lösenord. Allt nedan kräver inloggning
 -- (rollen authenticated); Row Level Security avgör sedan vilka rader man kommer åt.
 
--- Äldre version släppte bara in studentmejl. Ta bort den spärren om den finns.
-drop trigger if exists check_email_domain on auth.users;
-drop function if exists public.reject_disallowed_email();
-
 -- En rad per student med namn och kursplan
 create table if not exists public.plans (
   user_id    uuid primary key default auth.uid() references auth.users (id) on delete cascade,
@@ -211,6 +207,3 @@ grant select, insert, update, delete on public.grades to authenticated;
 -- Funktioner: bara de som sidan anropar får köras av inloggade.
 revoke execute on function public.pool_set_editor(), public.pool_log() from public, anon, authenticated;
 grant execute on function public.classmate_plans() to authenticated;
-
--- Rester från versionen med studentmejl (körs sist, när inga policyer använder funktionen längre)
-drop function if exists public.email_allowed(text);
