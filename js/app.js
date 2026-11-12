@@ -668,6 +668,7 @@ function renderPicker() {
 
   const qi = $("#pick-q");
   qi.oninput = () => {
+    if (!state.picker) return;
     state.pickerQuery = qi.value;
     const pos = qi.selectionStart;
     renderPicker();
