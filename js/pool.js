@@ -13,11 +13,28 @@
 import { COURSES, AREAS, LEVELS, periodsOf, yearOfTerm } from "./courses.js";
 import { INFO } from "./course-info.js";
 import { SEED_FOLDERS, SEED_EXTRA_COURSES } from "./folders.js";
+import { REQS } from "./reqs.js";
 
 export const pool = { courses: [], byId: {}, folders: [], seedIds: new Set(), overridden: new Set() };
 
 // Fält som studenterna får ändra i kurspoolen. Allt annat tas från koden.
-export const EDITABLE = ["name", "code", "hp", "level", "areas", "prereq", "url", "note", "offerings", "anyPeriod", "summer", "year", "folders"];
+export const EDITABLE = ["name", "code", "hp", "level", "areas", "prereq", "url", "note", "offerings", "anyPeriod", "summer", "year", "folders", "req"];
+
+// Behörighetskrav som kontrolleras: hp per kategori och kurser som krävs.
+// req = { hp: { total, tn, adv, Teknik, ... }, c: ["1MA013", "1TD433|1TD342", "~1MA016"] }
+export const HP_KEYS = ["total", "tn", "adv", "Teknik", "Matematik", "Fysik", "Kemi", "Biologi"];
+const REQ_TOKEN = /^~?[A-Za-zÅÄÖåäö0-9-]{2,40}$/;
+export function cleanReq(r) {
+  const hp = {};
+  for (const k of HP_KEYS) {
+    const v = Number(r?.hp?.[k]);
+    if (Number.isFinite(v) && v > 0) hp[k] = Math.min(400, Math.round(v * 2) / 2);
+  }
+  const c = (Array.isArray(r?.c) ? r.c : [])
+    .map((g) => String(g).split("|").map((t) => t.trim()).filter((t) => REQ_TOKEN.test(t)).slice(0, 8).join("|"))
+    .filter(Boolean).slice(0, 20);
+  return { hp, c };
+}
 const RULE_FIELDS = ["type", "oneOf", "thick", "techNat", "inStudyPlan", "uni"];
 
 const semOf = (periods) => (periods[0] <= 2 ? "HT" : "VT");
@@ -59,7 +76,7 @@ function fromStudyPlan(c) {
   const info = INFO[c.code] || {};
   return {
     id: c.code, code: c.code, name: c.name, hp: c.hp, level: c.level, areas, teknik: areas.includes("Teknik"),
-    prereq: info.prereq || "", url: info.url || "", note: c.note || "",
+    prereq: info.prereq || "", url: info.url || "", note: c.note || "", req: cleanReq(REQS[c.code]),
     offerings, anyPeriod: !periodsOf(c) && c.term !== "S", summer: c.term === "S",
     year: yearOfTerm(c.term), folders: ["programplanen"],
     type: c.type, oneOf: c.oneOf, thick: !!c.thick, techNat: c.techNat !== false, uni: c.uni, inStudyPlan: true,
@@ -87,6 +104,7 @@ function normalizeCourse(c, seed) {
     summer: !!c.summer,
     year: Number.isInteger(year) && year >= 1 && year <= 5 ? year : null,
     folders: (Array.isArray(c.folders) ? c.folders : []).map((f) => str(f, 40)).filter(Boolean),
+    req: cleanReq(c.req),
     updated_by: str(c.updated_by, 120),
     updated_at: c.updated_at,
   };
@@ -97,7 +115,7 @@ function normalizeCourse(c, seed) {
 }
 
 const SEED = () => {
-  const list = [...COURSES.map(fromStudyPlan), ...SEED_EXTRA_COURSES.map((c) => normalizeCourse({ ...c }, null))];
+  const list = [...COURSES.map(fromStudyPlan), ...SEED_EXTRA_COURSES.map((c) => normalizeCourse({ req: REQS[c.id], ...c }, null))];
   for (const c of list) {
     if (c.thick === undefined) c.thick = false;
     if (c.summer && !c.folders.includes("sommarkurser")) c.folders.push("sommarkurser");
@@ -123,7 +141,7 @@ export function buildPool(courseRows = [], folderRows = []) {
     const data = r.data && typeof r.data === "object" ? r.data : {};
     const arrays = ["areas", "offerings", "folders"];
     const editable = Object.fromEntries(EDITABLE
-      .filter((k) => k in data && data[k] != null && (!arrays.includes(k) || Array.isArray(data[k])))
+      .filter((k) => k in data && data[k] != null && (!arrays.includes(k) || Array.isArray(data[k])) && (k !== "req" || typeof data[k] === "object"))
       .map((k) => [k, data[k]]));
     if (base) pool.overridden.add(r.id);
     byId[r.id] = normalizeCourse({ ...(base || {}), ...editable, thick: base ? base.thick : data.thick, id: r.id, updated_by: r.updated_by, updated_at: r.updated_at }, base);

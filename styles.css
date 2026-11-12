@@ -607,3 +607,17 @@ button.person:hover { background: var(--accent-soft); outline: 1px solid var(--e
 .unsaved-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 .dlg-head-actions { display: flex; align-items: center; gap: 6px; flex: none; }
 .dlg-head-actions .btn svg { width: 15px; height: 15px; vertical-align: -2px; }
+
+/* Behörighet som kontrolleras (kursformuläret) */
+.hp-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+@media (max-width: 560px) { .hp-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.hp-grid .field { font-size: 12px; }
+.req-crow { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; margin-bottom: 6px; }
+.req-alts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chip-c { display: inline-flex; align-items: center; gap: 4px; background: var(--accent-soft); color: var(--accent); border-radius: 999px; padding: 2px 4px 2px 10px; font-size: 13px; font-weight: 700; }
+.chip-c button { border: 0; background: none; color: inherit; cursor: pointer; font-size: 12px; padding: 0 4px; border-radius: 50%; }
+.chip-c button:hover { background: rgb(0 0 0 / 0.08); }
+.req-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; }
+.req-tools select { flex: 1 1 160px; font-size: 13px; padding: 5px 8px; }
+.req-tools .icon-btn { margin-left: auto; }
+.req-edit > select { width: 100%; }

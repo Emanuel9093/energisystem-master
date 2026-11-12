@@ -1,7 +1,7 @@
 import { LEVELS, KNOWN_AREAS } from "./courses.js";
 import { evaluate, STATUSES } from "./rules.js";
 import { ALLOWED_EMAIL_DOMAINS } from "./config.js";
-import { pool, buildPool, courseById, coursesIn, courseData, offeringText, safeUrl } from "./pool.js";
+import { pool, buildPool, courseById, coursesIn, courseData, offeringText, safeUrl, HP_KEYS, cleanReq } from "./pool.js";
 import * as store from "./store.js";
 import { guideHTML } from "./guide.js";
 import { eligibility } from "./prereq.js";
@@ -1038,7 +1038,7 @@ function renderPool() {
   const q = state.poolQuery.trim().toLowerCase();
   let list = fid === "all" ? pool.courses : coursesIn(fid);
   list = list.filter((c) =>
-    (!q || c.name.toLowerCase().includes(q) || (c.code || "").toLowerCase().includes(q) || c.prereq.toLowerCase().includes(q)) &&
+    (!q || c.name.toLowerCase().includes(q) || (c.code || "").toLowerCase().includes(q)) &&
     (!state.poolArea || c.areas.includes(state.poolArea)) &&
     (!state.poolLevel || String(c.level).startsWith(state.poolLevel)) &&
     (!state.poolSem || (state.poolSem === "any" ? c.anyPeriod || c.summer : c.offerings.some((o) => o.sem === state.poolSem))));
@@ -1247,6 +1247,63 @@ function openFolderPicker(c) {
   };
 }
 
+const HP_FIELD = {
+  total: "hp totalt", tn: "hp teknik/naturvet.", adv: "hp avancerad nivå",
+  Teknik: "hp teknik", Matematik: "hp matematik", Fysik: "hp fysik", Kemi: "hp kemi", Biologi: "hp biologi",
+};
+
+// Redigerare för "kurser som krävs". Varje rad är ett krav; flera kurser på samma rad
+// betyder "någon av dem". "~" framför en kurskod = får läsas parallellt.
+function bindReqCourses(box, hidden, selfId) {
+  const opts = pool.courses.filter((c) => c.id !== selfId).sort((a, b) => a.name.localeCompare(b.name, "sv"))
+    .map((c) => `<option value="${esc(c.id)}">${esc(c.name)}${c.code ? ` (${esc(c.code)})` : ""}</option>`).join("");
+  const nameOf = (t) => courseById(t.replace("~", ""))?.name || t.replace("~", "");
+  const read = () => { try { return JSON.parse(hidden.value) || []; } catch { return []; } };
+  const write = (rows) => { hidden.value = JSON.stringify(rows.filter((r) => r.length)); draw(); };
+  function draw() {
+    const rows = read();
+    box.innerHTML = `
+      ${rows.map((alts, ri) => {
+        const par = alts.filter((t) => t.startsWith("~")).length;
+        return `
+        <div class="req-crow">
+          <div class="req-alts">${alts.map((t, ai) => `<span class="chip-c">${esc(nameOf(t))}${par && par < alts.length && t.startsWith("~") ? " (parallellt)" : ""}<button type="button" data-rm-alt="${ri}:${ai}" aria-label="Ta bort ${esc(nameOf(t))}">✕</button></span>`).join(`<span class="muted small">eller</span>`)}</div>
+          <div class="req-tools">
+            <select data-add-alt="${ri}" aria-label="Lägg till alternativ"><option value="">+ eller …</option>${opts}</select>
+            <label class="check small"><input type="checkbox" data-par="${ri}" ${par === alts.length ? "checked" : ""} ${par && par < alts.length ? "data-mixed" : ""}> Får läsas parallellt</label>
+            <button type="button" class="icon-btn" data-rm-row="${ri}" aria-label="Ta bort kravet">✕</button>
+          </div>
+        </div>`;
+      }).join("") || `<p class="muted small" style="margin:0 0 6px">Inga kurser krävs.</p>`}
+      <select data-add-row aria-label="Lägg till kurs som krävs"><option value="">+ Lägg till kurs som krävs …</option>${opts}</select>`;
+    box.querySelectorAll("[data-mixed]").forEach((x) => (x.indeterminate = true));
+  }
+  box.addEventListener("change", (ev) => {
+    const t = ev.target;
+    const rows = read();
+    if (t.matches("[data-add-row]") && t.value) { rows.push([t.value]); return write(rows); }
+    if (t.matches("[data-add-alt]") && t.value) {
+      const r = rows[Number(t.dataset.addAlt)];
+      const par = r.every((x) => x.startsWith("~"));
+      if (!r.some((x) => x.replace("~", "") === t.value)) r.push((par ? "~" : "") + t.value);
+      return write(rows);
+    }
+    if (t.matches("[data-par]")) {
+      const ri = Number(t.dataset.par);
+      rows[ri] = rows[ri].map((x) => (t.checked ? "~" : "") + x.replace("~", ""));
+      return write(rows);
+    }
+  });
+  box.addEventListener("click", (ev) => {
+    const rows = read();
+    const ra = ev.target.closest("[data-rm-alt]");
+    if (ra) { const [ri, ai] = ra.dataset.rmAlt.split(":").map(Number); rows[ri].splice(ai, 1); return write(rows); }
+    const rr = ev.target.closest("[data-rm-row]");
+    if (rr) { rows.splice(Number(rr.dataset.rmRow), 1); return write(rows); }
+  });
+  draw();
+}
+
 const PERIOD_OPTS = { HT: [["", "Ges inte"], ["1", "Period 1"], ["2", "Period 2"], ["1,2", "Period 1–2"], ["2,3", "Period 2–3 (över årsskiftet)"]], VT: [["", "Ges inte"], ["3", "Period 3"], ["4", "Period 4"], ["3,4", "Period 3–4"]] };
 
 function openCourseEditor(c) {
@@ -1282,7 +1339,17 @@ function openCourseEditor(c) {
           </div>
           <label class="field">Annat huvudområde (kommaseparerat)<input name="otherAreas" value="${esc(extraAreas.join(", "))}"></label>
         </fieldset>
-        <label class="field wide">Behörighet<textarea name="prereq" rows="4" maxlength="1500">${esc(cur.prereq)}</textarea></label>
+        <label class="field wide">Behörighet (text från kurssidan)<textarea name="prereq" rows="4" maxlength="1500">${esc(cur.prereq)}</textarea></label>
+        <fieldset class="wide req-edit">
+          <legend>Behörighet som kontrolleras</legend>
+          <p class="muted small">Behörighetslampan i planen räknas ut från de här fälten, inte från texten ovan. Hoppa över krav som gymnasiekurser och Engelska 6.</p>
+          <div class="hp-grid">
+            ${HP_KEYS.map((k) => `<label class="field">${HP_FIELD[k]}<input type="number" name="req-${k}" min="0" max="400" step="0.5" placeholder="0" value="${esc(cur.req?.hp?.[k] ?? "")}"></label>`).join("")}
+          </div>
+          <div class="field">Kurser som krävs</div>
+          <div id="req-courses"></div>
+          <input type="hidden" name="reqc" value="${esc(JSON.stringify((cur.req?.c || []).map((g) => g.split("|"))))}">
+        </fieldset>
         <label class="field wide">Länk till kurssidan<input name="url" type="url" value="${esc(cur.url)}" placeholder="https://www.uu.se/utbildning/kurs?query=…"></label>
         <label class="field wide">Anteckning<input name="note" maxlength="300" value="${esc(cur.note)}"></label>
         <fieldset class="wide">
@@ -1294,6 +1361,7 @@ function openCourseEditor(c) {
       <div class="dlg-foot"><button type="button" class="btn" data-close>Avbryt</button><button class="btn primary" type="submit">Spara</button></div>
     </form>`);
 
+  bindReqCourses($("#req-courses"), $('#course-form [name="reqc"]'), cur.id);
   guardForm($("#course-form"));
   $("#course-form").onsubmit = async (ev) => {
     ev.preventDefault();
@@ -1311,6 +1379,10 @@ function openCourseEditor(c) {
       anyPeriod: fd.get("anyPeriod") === "on", summer: fd.get("summer") === "on",
       areas: [...new Set(areas)], prereq: fd.get("prereq").trim(), url: safeUrl(fd.get("url").trim()), note: fd.get("note").trim(),
       folders: fd.getAll("folders"),
+      req: cleanReq({
+        hp: Object.fromEntries(HP_KEYS.map((k) => [k, fd.get("req-" + k)])),
+        c: JSON.parse(fd.get("reqc") || "[]").map((alts) => alts.join("|")),
+      }),
     };
     if (!offerings.length && !next.anyPeriod && !next.summer) {
       $("#course-err").textContent = "Välj minst en termin, valfri period eller sommar.";

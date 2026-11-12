@@ -17,7 +17,7 @@ En webbsida för oss på Civilingenjörsprogrammet i energisystem (TES2Y, UU/SLU
 - **ESare**: dina pågående och planerade kurser och vilka som läser dem samma period. Klicka på en person för att se hela planen, eller sök efter person eller kurs.
 - **Kurspoolen**: alla kurser med behörighet, huvudområden och när de ges (HT/VT, period). Kurserna ligger i mappar: *Programplanen*, *Teknikbaserat entreprenörskap* och *Övrig matematik*. Alla kan skapa nya mappar, lägga till kurser, ändra kurser (t.ex. att en kurs ges både HT och VT) och flytta kurser mellan mappar. Ändringar i studieplanens kurser kan återställas. Kursväljaren i Min plan hämtar kurserna härifrån.
 - **Guide**: förklarar examenskraven och hur sidan används. Nya användare får en ruta under Min plan som länkar till guiden.
-- **Behörighet**: röd lampa på planerade kurser man inte är behörig till, gul om man blir behörig när planerade kurser är klara. Kraven finns i `js/prereq.js`.
+- **Behörighet**: röd lampa på planerade kurser man inte är behörig till, gul om man blir behörig när planerade kurser är klara. Kraven (hp och kurser som krävs) går att ändra i Kurspoolen under "Behörighet som kontrolleras". Startvärdena finns i `js/reqs.js`.
 - **Somrar**: plustecknet mellan två år lägger till en sommar för sommarkurser.
 - **Mina betyg**: fyll i betyg (3/4/5/G/VG) för kurser som är klara. Viktat snitt räknas ut automatiskt och visas som en kurva termin för termin. Betygen sparas privat och visas aldrig för andra ESare.
 
