@@ -907,6 +907,8 @@ dlg.addEventListener("click", (ev) => {
     it.status = st.dataset.setStatus;
     changed();
     renderPlan();
+    // "Läser nu" och "Klar" stänger kursvyn direkt. "Planerar" håller den öppen.
+    if (it.status === "ongoing" || it.status === "done") return dlg.close();
     return openItem(it.id);
   }
   const eo = ev.target.closest("[data-elig-ok]");
