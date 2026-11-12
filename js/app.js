@@ -692,11 +692,12 @@ function renderForce(c, ctx) {
     </div>`;
 }
 
-// Ligger kursen utanför de perioder den ges? Räknas ut varje gång, så att varningen
-// också visas om kursens perioder ändras i kurspoolen.
+// Ligger en planerad kurs utanför de perioder den ges? Räknas ut varje gång, så att varningen
+// också visas om kursens perioder ändras i kurspoolen. Läser man kursen eller har klarat den
+// visas ingen varning.
 function offPeriod(it) {
   const c = itemCourse(it);
-  if (!c) return false;
+  if (!c || it.status !== "planned") return false;
   if (it.summer) return !c.summer;
   if (c.anyPeriod) return false;
   return !c.offerings.some((o) => o.periods[0] === it.period && o.periods.length === it.span);
