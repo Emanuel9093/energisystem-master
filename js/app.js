@@ -645,12 +645,15 @@ function renderPicker() {
         <h2>Välj kurs</h2>
         <p class="muted small">${ctx.summer ? `Sommaren mellan år ${ctx.year} och ${ctx.year + 1}` : `År ${ctx.year} · period ${ctx.period} · rad ${ctx.row + 1}`}</p>
       </div>
-      <button class="icon-btn" data-close aria-label="Stäng">✕</button>
+      <div class="dlg-head-actions">
+        <button type="button" class="btn small" data-open-custom>${ICONS.plus} Privat kurs</button>
+        <button class="icon-btn" data-close aria-label="Stäng">✕</button>
+      </div>
     </div>
     <input type="search" id="pick-q" placeholder="Sök bland alla kurser i kurspoolen" value="${esc(state.pickerQuery)}">
     ${state.pickerQuery ? "" : `<p class="muted small" style="margin:6px 0 0">Här visas kurser som ges ${ctx.summer ? "på sommaren" : `i period ${ctx.period}`}. Sök efter en kurs för att lägga till den ändå, till exempel om du tentar den i en annan period.</p>`}
     <div class="pick-list">${body}</div>
-    <details class="custom-box">
+    <details class="custom-box" id="custom-box">
       <summary>Lägg till en privat kurs (syns bara i din plan)</summary>
       <p class="muted small">Vill du att andra ska kunna välja kursen? Lägg till den i Kurspoolen i stället.</p>
       <form id="custom-form" class="custom-form">
@@ -802,6 +805,13 @@ dlg.addEventListener("click", (ev) => {
   if (person) return openPerson(Number(person.dataset.person));
   if (dlgHandler) return dlgHandler(ev);
   if (ev.target.closest("[data-back]") && state.picker) return renderPicker();
+  if (ev.target.closest("[data-open-custom]")) {
+    const box = $("#custom-box");
+    box.open = true;
+    box.scrollIntoView({ behavior: "smooth", block: "start" });
+    box.querySelector('[name="name"]').focus({ preventScroll: true });
+    return;
+  }
   const forced = ev.target.closest("[data-force]");
   const pick = forced || ev.target.closest("[data-pick]");
   if (pick && !pick.disabled && state.picker) {

@@ -605,3 +605,5 @@ button.person:hover { background: var(--accent-soft); outline: 1px solid var(--e
 .unsaved-box h3 { margin: 0 0 4px; }
 .unsaved-box p { margin: 0 0 14px; }
 .unsaved-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.dlg-head-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.dlg-head-actions .btn svg { width: 15px; height: 15px; vertical-align: -2px; }
