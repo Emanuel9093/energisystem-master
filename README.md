@@ -14,11 +14,11 @@ En webbsida för oss på Civilingenjörsprogrammet i energisystem (TES2Y, UU/SLU
   - minst 3 kurser "teknik och system" (Elkraftsystemanalys räknas)
   - minst 20 hp valbara tekniska/naturvetenskapliga kurser ur studieplanen
   - varningar för kurspar som inte får räknas tillsammans och för mer än 30 hp utanför studieplanen
-- **Klasskompisar**: dina pågående och planerade kurser och vilka som läser dem samma period. Klicka på en person för att se hela planen, eller sök efter person eller kurs.
+- **ESare**: dina pågående och planerade kurser och vilka som läser dem samma period. Klicka på en person för att se hela planen, eller sök efter person eller kurs.
 - **Kurspoolen**: alla kurser med behörighet, huvudområden och när de ges (HT/VT, period). Kurserna ligger i mappar: *Programplanen*, *Teknikbaserat entreprenörskap* och *Övrig matematik*. Alla kan skapa nya mappar, lägga till kurser, ändra kurser (t.ex. att en kurs ges både HT och VT) och flytta kurser mellan mappar. Ändringar i studieplanens kurser kan återställas. Kursväljaren i Min plan hämtar kurserna härifrån.
 - **Guide**: förklarar examenskraven och hur sidan används. Nya användare får en ruta under Min plan som länkar till guiden.
 - **Somrar**: plustecknet mellan två år lägger till en sommar för sommarkurser.
-- **Mina betyg**: fyll i betyg (3/4/5/G/VG) för kurser som är klara. Viktat snitt räknas ut automatiskt och visas som en kurva termin för termin. Betygen sparas privat och visas aldrig för klasskompisar.
+- **Mina betyg**: fyll i betyg (3/4/5/G/VG) för kurser som är klara. Viktat snitt räknas ut automatiskt och visas som en kurva termin för termin. Betygen sparas privat och visas aldrig för andra ESare.
 
 År 1–3 fylls i automatiskt med de obligatoriska kurserna (markerade som klara) när någon skapar sin plan. De går att ta bort om man har tillgodoräknat något annat.
 
@@ -32,7 +32,7 @@ Sidan är ren HTML/JS utan byggsteg:
 python -m http.server 5173
 ```
 
-Öppna http://localhost:5173. Utan Supabase körs **demoläge**: din plan sparas i webbläsaren och klasskompisarna är påhittade.
+Öppna http://localhost:5173. Utan Supabase körs **demoläge**: din plan sparas i webbläsaren och de andra ESarna är påhittade.
 
 ## Koppla till Supabase (delad data och inloggning)
 
@@ -43,7 +43,7 @@ python -m http.server 5173
 
 Inloggning sker med en länk som mejlas till studentadressen (`@student.uu.se` eller `@stud.slu.se`). Vill du ändra vilka adresser som släpps in ändrar du både `ALLOWED_EMAIL_DOMAINS` i `js/config.js` och funktionen `email_allowed` i `schema.sql`.
 
-Varje student kan bara ändra sin egen plan. Klasskompisarnas planer hämtas via databasfunktionen `classmate_plans()`. Den tar bort avklarade kurser för den som bockat i "Dölj mina avklarade kurser för klasskompisar", så de lämnar aldrig databasen. Pågående och planerade kurser syns alltid.
+Varje student kan bara ändra sin egen plan. Andra ESares planer hämtas via databasfunktionen `classmate_plans()`. Den tar bort avklarade kurser för den som bockat i "Dölj mina avklarade kurser för andra ESare", så de lämnar aldrig databasen. Pågående och planerade kurser syns alltid.
 
 > Supabases inbyggda mejlutskick är begränsat till några få mejl i timmen. Om många ska logga in samtidigt: lägg in en egen SMTP-server under **Authentication → Emails → SMTP Settings**.
 

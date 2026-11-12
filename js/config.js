@@ -3,7 +3,7 @@
 // Row Level Security i supabase/schema.sql.
 //
 // Lämnar du fälten tomma körs sidan i demoläge: allt sparas bara i din egen
-// webbläsare och klasskompisarna är påhittade exempel.
+// webbläsare och de andra ESarna är påhittade exempel.
 
 export const SUPABASE_URL = "";
 export const SUPABASE_ANON_KEY = "";

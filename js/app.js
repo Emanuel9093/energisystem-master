@@ -280,13 +280,13 @@ function renderPlan() {
     <div class="plan-layout">
       <div class="stack">
         <div class="card profile">
-          <label class="field">Namn (syns för klasskompisar)
+          <label class="field">Namn (syns för andra ESare)
             <input id="p-name" value="${esc(state.plan.name)}" maxlength="80" placeholder="För- och efternamn">
           </label>
           <label class="field">Startår
             <input id="p-year" type="number" min="2010" max="2040" value="${esc(state.plan.start_year ?? "")}" placeholder="t.ex. 2022">
           </label>
-          <label class="check" title="Pågående och planerade kurser syns alltid för klasskompisar."><input id="p-hide-done" type="checkbox" ${state.plan.hide_done ? "checked" : ""}> Dölj mina avklarade kurser för klasskompisar</label>
+          <label class="check" title="Pågående och planerade kurser syns alltid för andra ESare."><input id="p-hide-done" type="checkbox" ${state.plan.hide_done ? "checked" : ""}> Dölj mina avklarade kurser för andra ESare</label>
         </div>
 
         <nav class="year-tabs" aria-label="Välj år eller sommar">${yearTabs()}</nav>
@@ -329,7 +329,7 @@ function summerCard(y) {
     <div class="summer-list">
       ${items.map((it) => {
         const icon = it.status === "done" ? ICONS.lock : it.status === "ongoing" ? ICONS.clock : "";
-        return `<button class="pill ${it.status}" data-item="${esc(it.id)}" title="${esc(itemName(it))} – ${STATUSES[it.status]}">${icon}<span class="pill-name">${esc(itemName(it))}</span><span class="hp">${itemHp(it)} hp</span></button>`;
+        return `<button class="pill ${it.status}" data-item="${esc(it.id)}" title="${esc(itemName(it))} – ${STATUSES[it.status]}${offPeriod(it) ? ". " + esc(offNote(it)) : ""}">${offPeriod(it) ? WARN : icon}<span class="pill-name">${esc(itemName(it))}</span><span class="hp">${itemHp(it)} hp</span></button>`;
       }).join("")}
       <button class="slot summer-add" id="add-summer-course">${ICONS.plus} Lägg till sommarkurs</button>
     </div>
@@ -363,8 +363,8 @@ function yearCard(y) {
     return `
       <button class="pill ${it.status} ${it.thick ? "thick" : ""}" data-item="${esc(it.id)}"
         style="grid-row:${(it.thick ? 0 : it.row) + 1} / span ${rowSpan};grid-column:${it.period} / span ${it.span}"
-        title="${esc(name)} – ${STATUSES[it.status]}">
-        ${icon}<span class="pill-name">${esc(name)}</span><span class="hp">${itemHp(it)} hp</span>
+        title="${esc(name)} – ${STATUSES[it.status]}${offPeriod(it) ? ". " + esc(offNote(it)) : ""}">
+        ${offPeriod(it) ? WARN : icon}<span class="pill-name">${esc(name)}</span><span class="hp">${itemHp(it)} hp</span>
       </button>`;
   }).join("");
 
@@ -539,16 +539,19 @@ function courseTags(c) {
 // Var kursen hamnar om man klickar på (år, period, rad). Kursen läggs alltid i de
 // perioder den faktiskt ges; klickar man i period 2 på en P1–2-kurs hamnar den i P1–2.
 // Är raden upptagen används första lediga rad.
-function slotFor(c, ctx, ignoreId) {
+// force: lägg kursen där man klickade även om den inte ges då (offErr = bara perioden är fel).
+function slotFor(c, ctx, ignoreId, force = false) {
   if (ctx.summer) {
-    return c.summer ? { start: 1, span: 1, row: nextSummerRow(ctx.year), err: null } : { err: `Ges inte på sommaren (ges ${offeringText(c).join(", ")}).` };
+    if (c.summer || force) return { start: 1, span: 1, row: nextSummerRow(ctx.year), err: null };
+    return { err: `Ges inte på sommaren (ges ${offeringText(c).join(", ")}).`, offErr: true };
   }
   const o = c.offerings.find((x) => x.periods.includes(ctx.period));
   let start, span;
   if (o) { start = o.periods[0]; span = o.periods.length; }
   else if (c.anyPeriod) { start = ctx.period; span = 1; }
-  else if (c.summer) return { err: "Sommarkurs. Lägg till en sommar med plustecknet mellan två år och lägg kursen där." };
-  else return { err: `Ges inte i period ${ctx.period} (ges ${offeringText(c).join(", ")}).` };
+  else if (force) { start = ctx.period; span = Math.min(c.offerings[0]?.periods.length || 1, 5 - ctx.period); }
+  else if (c.summer) return { err: "Sommarkurs. Ges bara på sommaren (plustecknet mellan två år).", offErr: true };
+  else return { err: `Ges inte i period ${ctx.period} (ges ${offeringText(c).join(", ")}).`, offErr: true };
   if (c.thick) return { start, span, row: 0, err: placementError(ctx.year, start, 0, span, true, ignoreId) };
   const rows = [ctx.row, ...[...Array(rowsOf(ctx.year)).keys()].filter((r) => r !== ctx.row)];
   const row = rows.find((r) => !placementError(ctx.year, start, r, span, false, ignoreId));
@@ -563,11 +566,12 @@ function pickEntry(c, ctx) {
   const placed = placedWhere(c.id);
   const replaces = groupItem(c);
   const slot = slotFor(c, ctx, replaces?.year === ctx.year ? replaces.id : undefined);
-  const err = placed ? `Redan inlagd (${whenText(placed).toLowerCase()})` : slot.err;
+  const off = !placed && slot.offErr;
+  const err = placed ? `Redan inlagd (${whenText(placed).toLowerCase()})` : off ? null : slot.err;
   const mates = matesFor(c.id).length;
   const where = slot.err ? "" : ctx.summer ? "Hamnar på sommaren" : `Hamnar i period ${Number(slot.start)}${slot.span > 1 ? "–" + (Number(slot.start) + Number(slot.span) - 1) : ""}`;
   return `
-    <button class="pick" data-pick="${esc(c.id)}" ${err ? "disabled" : ""}>
+    <button class="pick ${off ? "off" : ""}" data-pick="${esc(c.id)}" ${off ? 'data-off="1"' : ""} ${err ? "disabled" : ""}>
       <span class="pick-main">
         <span class="pick-name">${esc(c.name)}</span>
         <span class="course-meta">
@@ -575,9 +579,11 @@ function pickEntry(c, ctx) {
           <span>Ges ${esc(offeringText(c).join(", "))}</span>
           ${c.year ? `<span>Rek. år ${esc(c.year)}</span>` : ""}
           ${c.thick ? `<span class="tag">Tar alla tre rader</span>` : ""}
-          ${mates ? `<span class="tag mates">${plural(mates, "klasskompis", "klasskompisar")}</span>` : ""}
+          ${mates ? `<span class="tag mates">${plural(mates, "ESare", "ESare")}</span>` : ""}
         </span>
-        ${err ? `<span class="pick-err">${esc(err)}</span>` : `<span class="pick-ok">${where}${replaces ? ` · ersätter ${esc(itemName(replaces))}` : ""}</span>`}
+        ${err ? `<span class="pick-err">${esc(err)}</span>`
+          : off ? `<span class="pick-warn">${esc(slot.err)} Klicka för att lägga till ändå.</span>`
+          : `<span class="pick-ok">${where}${replaces ? ` · ersätter ${esc(itemName(replaces))}` : ""}</span>`}
       </span>
     </button>`;
 }
@@ -619,6 +625,7 @@ function renderPicker() {
       <button class="icon-btn" data-close aria-label="Stäng">✕</button>
     </div>
     <input type="search" id="pick-q" placeholder="Sök bland alla kurser i kurspoolen" value="${esc(state.pickerQuery)}">
+    ${state.pickerQuery ? "" : `<p class="muted small" style="margin:6px 0 0">Här visas kurser som ges ${ctx.summer ? "på sommaren" : `i period ${ctx.period}`}. Sök efter en kurs för att lägga till den ändå, till exempel om du tentar den i en annan period.</p>`}
     <div class="pick-list">${body}</div>
     <details class="custom-box">
       <summary>Lägg till en privat kurs (syns bara i din plan)</summary>
@@ -662,6 +669,41 @@ function renderPicker() {
   };
 }
 
+// Varning innan en kurs läggs i en period där den inte ges.
+function renderForce(c, ctx) {
+  const replaces = groupItem(c);
+  const why = slotFor(c, ctx, replaces?.year === ctx.year ? replaces.id : undefined);
+  const slot = slotFor(c, ctx, replaces?.year === ctx.year ? replaces.id : undefined, true);
+  const where = ctx.summer ? "på sommaren" : `i period ${slot.start}${slot.span > 1 ? "–" + (slot.start + slot.span - 1) : ""}`;
+  dlg.innerHTML = `
+    <div class="dlg-head">
+      <div>
+        <h2>Lägga till ändå?</h2>
+        <p class="muted small">${ctx.summer ? `Sommaren mellan år ${ctx.year} och ${ctx.year + 1}` : `År ${ctx.year} · period ${ctx.period}`}</p>
+      </div>
+      <button class="icon-btn" data-close aria-label="Stäng">✕</button>
+    </div>
+    <div class="warn-box"><strong>${esc(c.name)}</strong> ${esc(why.err || "")}</div>
+    <p>Det kan stämma ändå, till exempel om du är registrerad på kursen men läser den på egen hand och skriver tentan i en annan period eller på sommaren, eller om kursen har bytt perioder.</p>
+    ${slot.err ? `<p class="pick-err">${esc(slot.err)}</p>` : `<p class="muted small">Kursen hamnar ${where} och markeras med en varning i planen.${replaces ? ` Den ersätter ${esc(itemName(replaces))}.` : ""}</p>`}
+    <div class="dlg-foot">
+      <button class="btn" data-back>Tillbaka</button>
+      <button class="btn primary" data-force="${esc(c.id)}" ${slot.err ? "disabled" : ""}>Lägg till ändå</button>
+    </div>`;
+}
+
+// Ligger kursen utanför de perioder den ges? Räknas ut varje gång, så att varningen
+// också visas om kursens perioder ändras i kurspoolen.
+function offPeriod(it) {
+  const c = itemCourse(it);
+  if (!c) return false;
+  if (it.summer) return !c.summer;
+  if (c.anyPeriod) return false;
+  return !c.offerings.some((o) => o.periods[0] === it.period && o.periods.length === it.span);
+}
+const offNote = (it) => `Ligger utanför kursens ordinarie perioder (ges ${offeringText(itemCourse(it)).join(", ")}).`;
+const WARN = `<span class="pill-warn" aria-hidden="true">!</span>`;
+
 // Dialogen används av kursväljaren, kursdetaljer och kurspoolens formulär.
 let dlgHandler = null;
 dlg.addEventListener("click", (ev) => {
@@ -669,12 +711,15 @@ dlg.addEventListener("click", (ev) => {
   const person = ev.target.closest("[data-person]");
   if (person) return openPerson(Number(person.dataset.person));
   if (dlgHandler) return dlgHandler(ev);
-  const pick = ev.target.closest("[data-pick]");
+  if (ev.target.closest("[data-back]") && state.picker) return renderPicker();
+  const forced = ev.target.closest("[data-force]");
+  const pick = forced || ev.target.closest("[data-pick]");
   if (pick && !pick.disabled && state.picker) {
-    const c = courseById(pick.dataset.pick);
+    const c = courseById(forced ? forced.dataset.force : pick.dataset.pick);
     const ctx = state.picker;
+    if (pick.dataset.off) return renderForce(c, ctx);
     const replaces = groupItem(c);
-    const slot = slotFor(c, ctx, replaces?.year === ctx.year ? replaces.id : undefined);
+    const slot = slotFor(c, ctx, replaces?.year === ctx.year ? replaces.id : undefined, !!forced);
     if (slot.err) { alert(slot.err); return; }
     if (replaces) state.plan.items = state.plan.items.filter((x) => x !== replaces);
     addItem(ctx.year, slot.start, slot.row, { code: c.id, span: slot.span, thick: !ctx.summer && !!c.thick, snap: snapOf(c), ...(ctx.summer ? { summer: true } : {}) }, replaces?.status || "planned");
@@ -743,13 +788,14 @@ function openItem(id) {
       ${c ? `${courseTags(c)}${c.areas.map((a) => `<span class="tag">${esc(a)}</span>`).join("")}`
       : `${x.code ? `<span>${esc(x.code)}</span>` : ""}<span>${Number(x.hp) || 0} hp</span><span class="tag">${esc(x.level)}</span>${x.teknik ? `<span class="tag">Teknik</span>` : ""}<span class="tag">${it.custom ? "Privat kurs" : "Borttagen ur kurspoolen"}</span>`}
     </div>
+    ${offPeriod(it) ? `<div class="warn-box small">${esc(offNote(it))}</div>` : ""}
     ${c?.prereq ? `<p class="small"><strong>Behörighet:</strong> ${esc(c.prereq)}</p>` : ""}
     ${c?.note ? `<p class="small muted">${esc(c.note)}</p>` : ""}
     <h3 class="pick-h">Status</h3>
     <div class="seg" role="group" aria-label="Status">
       ${Object.entries(STATUSES).reverse().map(([k, l]) => `<button data-set-status="${k}" data-id="${esc(it.id)}" class="${it.status === k ? "on" : ""}" aria-pressed="${it.status === k}">${l}</button>`).join("")}
     </div>
-    ${c ? `<h3 class="pick-h">Klasskompisar som läser kursen</h3>
+    ${c ? `<h3 class="pick-h">ESare som läser kursen</h3>
       ${mates.length ? `<div class="people">${mates.map(({ m, it: mi }) => personChip(m, mi.status)).join("")}</div>` : `<p class="muted small">Ingen ännu.</p>`}` : ""}
     ${c?.oneOf ? pool.courses.filter((x) => x.oneOf === c.oneOf && x.id !== c.id).map((alt) => `
       <h3 class="pick-h">Byt variant</h3>
@@ -877,7 +923,7 @@ function poolCourseCard(c) {
         <div class="pc-side">
           ${offeringText(c).map((t) => `<span class="sem">${esc(t)}</span>`).join("")}
           ${mine ? `<span class="tag ts">I din plan</span>` : ""}
-          ${mates ? `<span class="tag mates">${plural(mates, "klasskompis", "klasskompisar")}</span>` : ""}
+          ${mates ? `<span class="tag mates">${plural(mates, "ESare", "ESare")}</span>` : ""}
         </div>
       </summary>
       <div class="pc-body">
@@ -1242,7 +1288,7 @@ function renderGrades() {
     <div class="stack">
       <div>
         <h1>Mina betyg</h1>
-        <p class="muted" style="margin:0">Fyll i betyg för kurser som är markerade som klara i din plan. Betygen sparas bara för dig och visas aldrig för klasskompisar.</p>
+        <p class="muted" style="margin:0">Fyll i betyg för kurser som är markerade som klara i din plan. Betygen sparas bara för dig och visas aldrig för andra ESare.</p>
       </div>
       <div class="stats">
         <div class="card stat main"><span class="stat-label">Viktat snitt</span><span class="stat-value">${gpa ? gpa.toFixed(2) : "–"}</span><span class="muted small">viktat med hp, betyg 3–5</span></div>
@@ -1273,7 +1319,7 @@ function renderGrades() {
   };
 }
 
-// ---------- Klasskompisar ----------
+// ---------- ESare ----------
 
 const okStatus = (s) => (STATUSES[s] ? s : "planned");
 const itemKey = (it) => (it.code ? "c:" + it.code : "p:" + (it.custom?.code || it.custom?.name || "").trim().toLowerCase());
@@ -1335,14 +1381,14 @@ function renderMates() {
         </div>
         <div>
           ${same.length ? `<div class="people">${same.map(({ m, mi }) => personChip(m, mi.status)).join("")}</div>`
-            : `<span class="muted small">Ingen klasskompis läser den samtidigt.</span>`}
+            : `<span class="muted small">Ingen annan ESare läser den samtidigt.</span>`}
           ${other.length ? `<div class="other-time"><span class="muted small">Vid annan tid:</span> <div class="people">${other.map(({ m, mi }) => personChip(m, mi.status)).join("")}</div></div>` : ""}
         </div>
       </div>`;
   }).join("");
 
-  // 2. Sök klasskompis eller kurs
-  let searchHtml = `<p class="muted small" style="margin:0">Sök på ett namn för att se en klasskompis hela plan, eller på en kurs för att se vilka som läser den.</p>`;
+  // 2. Sök ESare eller kurs
+  let searchHtml = `<p class="muted small" style="margin:0">Sök på ett namn för att se en ESares hela plan, eller på en kurs för att se vilka som läser den.</p>`;
   if (q) {
     const people = state.mates.filter((m) => m.name.toLowerCase().includes(q));
     const courses = new Map();
@@ -1360,20 +1406,20 @@ function renderMates() {
     }
     const list = [...courses.values()].sort((a, b) => b.takers.length - a.takers.length).slice(0, 30);
     searchHtml = `
-      ${people.length ? `<h3 class="pick-h">Klasskompisar</h3><div class="people">${people.map((m) => personChip(m, "planned").replace(/<span class="dot[^>]*><\/span>/, "")).join("")}</div>` : ""}
+      ${people.length ? `<h3 class="pick-h">ESare</h3><div class="people">${people.map((m) => personChip(m, "planned").replace(/<span class="dot[^>]*><\/span>/, "")).join("")}</div>` : ""}
       ${list.length ? `<h3 class="pick-h">Kurser</h3>${list.map((x) => `
         <div class="mate-course compact">
           <div><div class="course-name">${esc(x.name)}</div><div class="course-meta">${x.code ? `<span>${esc(x.code)}</span>` : ""}<span>${x.hp} hp</span></div></div>
           <div class="people">${x.takers.map(({ m, it }) => personChip(m, it.status)).join("")}</div>
         </div>`).join("")}` : ""}
-      ${!people.length && !list.length ? `<p class="muted small" style="margin:0">Ingen klasskompis eller kurs matchar "${esc(state.mateQuery.trim())}".</p>` : ""}`;
+      ${!people.length && !list.length ? `<p class="muted small" style="margin:0">Ingen annan ESare eller kurs matchar "${esc(state.mateQuery.trim())}".</p>` : ""}`;
   }
 
   app.innerHTML = `
     <div class="stack">
       <div>
-        <h1>Klasskompisar</h1>
-        <p class="muted" style="margin:0">Vilka läser samma kurser som du, samtidigt? Klicka på en person för att se hela hens plan. ${plural(state.mates.length, "klasskompis", "klasskompisar")} har lagt in sina kurser.</p>
+        <h1>ESare</h1>
+        <p class="muted" style="margin:0">Sidan är öppen för alla ESare. Se vilka som läser samma kurser som du, samtidigt, och klicka på en person för att se hela hens plan. ${plural(state.mates.length, "ESare", "ESare")} har lagt in sina kurser.</p>
       </div>
       <div class="legend"><span><span class="dot done"></span> Klar</span><span><span class="dot ongoing"></span> Läser nu</span><span><span class="dot planned"></span> Planerar</span></div>
 
@@ -1384,7 +1430,7 @@ function renderMates() {
 
       <section class="card">
         <h2 style="margin:0 0 10px">Sök</h2>
-        <input type="search" id="mate-q" placeholder="Sök klasskompis eller kurs" value="${esc(state.mateQuery)}" style="width:100%">
+        <input type="search" id="mate-q" placeholder="Sök ESare eller kurs" value="${esc(state.mateQuery)}" style="width:100%">
         <div id="mate-results" style="margin-top:10px">${searchHtml}</div>
       </section>
     </div>`;
@@ -1404,7 +1450,7 @@ function renderMates() {
   };
 }
 
-// Hela planen för en klasskompis
+// Hela planen för en annan ESare
 function openPerson(i) {
   const m = state.mates[i];
   if (!m) return;

@@ -528,3 +528,13 @@ button.person:hover { background: var(--accent-soft); outline: 1px solid var(--e
 .person-plan li .pp-name { min-width: 0; }
 .person-plan li > .muted { margin-left: auto; font-size: 12.5px; white-space: nowrap; }
 .person-plan li.shared { background: var(--accent-soft); border-radius: 8px; }
+
+/* Kurs utanför ordinarie period */
+.pick.off .pick-name { opacity: 0.85; }
+.pick-warn { display: block; font-size: 12.5px; color: var(--warn); margin-top: 3px; }
+.warn-box { background: var(--warn-soft); color: var(--warn); border-radius: 10px; padding: 10px 12px; margin: 8px 0; }
+.warn-box.small { font-size: 13px; padding: 8px 10px; }
+.pill-warn {
+  flex: none; width: 18px; height: 18px; border-radius: 50%; display: inline-grid; place-items: center;
+  background: var(--warn); color: var(--surface); font-size: 12px; font-weight: 800;
+}

@@ -16,7 +16,7 @@ export function guideHTML() {
         <div>
           <h1>Så funkar ES Masterplanering</h1>
           <p>Här planerar du dina fem år på Civilingenjörsprogrammet i energisystem, ser direkt om planen räcker till examen
-          och ser vilka kurser klasskompisarna läser. Läs igenom sidan en gång, så kommer du igång på fem minuter.</p>
+          och ser vilka kurser andra ESare läser. Läs igenom sidan en gång, så kommer du igång på fem minuter.</p>
           <nav class="guide-toc">
             <a href="#g-krav">Vad krävs för examen?</a>
             <a href="#g-start">Kom igång</a>
@@ -60,7 +60,7 @@ export function guideHTML() {
         <h2>Kom igång</h2>
         <ol class="steps">
           <li><strong>Logga in</strong> med din studentadress. Du får en inloggningslänk på mejlen, inget lösenord behövs.</li>
-          <li><strong>Skriv ditt namn</strong> högst upp under Min plan, så att klasskompisarna ser vem du är.</li>
+          <li><strong>Skriv ditt namn</strong> högst upp under Min plan, så att andra ESare ser vem du är.</li>
           <li><strong>Kolla år 1–3.</strong> De obligatoriska kurserna är redan ifyllda och markerade som klara. Har du tillgodoräknat något annat
           klickar du på kursen och väljer <em>Ta bort från planen</em> och lägger in det du har läst i stället.</li>
           <li><strong>Planera år 4–5.</strong> Klicka på en tom ruta för att välja kurs. Du ser bara kurser som ges i den perioden. En kurs som går
@@ -84,7 +84,7 @@ export function guideHTML() {
         <h2>Flikarna</h2>
         <div class="tab-cards">
           <div><h3>Min plan</h3><p>Dina fem år, ett år i taget, och kontrollen av examenskraven. Välj <em>Bara klara kurser</em> för att se hur långt du har kommit.</p></div>
-          <div><h3>Klasskompisar</h3><p>Överst ser du dina pågående och planerade kurser och vilka klasskompisar som läser dem samma period. Klicka på en person för att se hela hens plan, eller sök efter en person eller kurs.</p></div>
+          <div><h3>ESare</h3><p>Överst ser du dina pågående och planerade kurser och vilka andra ESare som läser dem samma period. Klicka på en person för att se hela hens plan, eller sök efter en person eller kurs.</p></div>
           <div><h3>Kurspoolen</h3><p>Alla kurser med behörighet, huvudområden och när de ges, sorterade i mappar. Alla ES-studenter kan lägga till kurser, skapa mappar och rätta uppgifter, till exempel om en kurs ges både HT och VT. Ändringarna syns för alla.</p></div>
           <div><h3>Mina betyg</h3><p>Fyll i betyg för klara kurser så räknas ditt snitt ut automatiskt, viktat med hp, och du ser en kurva över hur snittet har ändrats termin för termin. G och VG räknas inte in.</p></div>
         </div>
@@ -93,7 +93,7 @@ export function guideHTML() {
       <section class="card" id="g-integritet">
         <h2>Vad syns för andra?</h2>
         <ul class="tips">
-          <li><strong>Syns för andra ES-studenter:</strong> ditt namn, startår och vilka kurser du har i planen, med status. Dina pågående och planerade kurser syns alltid. Bocka i <em>Dölj mina avklarade kurser för klasskompisar</em> om du inte vill visa vad du redan har läst.</li>
+          <li><strong>Syns för andra ES-studenter:</strong> ditt namn, startår och vilka kurser du har i planen, med status. Dina pågående och planerade kurser syns alltid. Bocka i <em>Dölj mina avklarade kurser för andra ESare</em> om du inte vill visa vad du redan har läst.</li>
           <li><strong>Syns aldrig för andra:</strong> dina betyg och din e-postadress.</li>
           <li><strong>Kurspoolen är gemensam.</strong> Det du ändrar där syns för alla, med ditt namn som senaste ändrare.</li>
         </ul>
@@ -105,8 +105,8 @@ export function guideHTML() {
           <p>Ta bort den obligatoriska kursen ur planen och lägg in kursen du läste. Finns den inte i Kurspoolen kan du lägga till den där, eller lägga till en privat kurs längst ner i kursväljaren.</p></details>
         <details><summary>Ska jag välja examensarbete vid UU eller SLU?</summary>
           <p>Det beror på var ditt exjobb examineras. Båda räknas, men bara en av dem får ingå. Väljer du den andra varianten i kursväljaren byts den du redan har ut.</p></details>
-        <details><summary>Varför kan jag inte lägga en kurs i en viss period?</summary>
-          <p>Kurser kan bara läggas i de perioder de ges, men vilket år som helst. Stämmer inte perioderna kan du rätta dem i Kurspoolen under <em>Ändra</em>.</p></details>
+        <details><summary>Kan jag lägga en kurs i en period där den inte ges?</summary>
+          <p>Kursväljaren visar de kurser som ges i perioden du klickade på, och de hamnar alltid i rätt perioder. Läser du en kurs på egen hand och tentar den i en annan period eller på sommaren kan du söka efter den, klicka på den och välja <em>Lägg till ändå</em>. Den får då ett varningstecken i planen. Har kursen bytt perioder kan du rätta det i Kurspoolen under <em>Ändra</em>.</p></details>
         <details><summary>Vad är kurspaketet i teknikbaserat entreprenörskap?</summary>
           <p>Ett 30 hp-paket hösten i årskurs 5 som söks i konkurrens. Det räknas till de 30 hp som får väljas fritt och kan inte kombineras med Stora sociotekniska system, Ingenjörsetik eller Miljörätt. Se mappen i Kurspoolen.</p></details>
         <details><summary>Jag vill läsa vidare till en matematikexamen.</summary>

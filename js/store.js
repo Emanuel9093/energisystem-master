@@ -6,14 +6,14 @@ import { BY_CODE, offeringsOf } from "./courses.js";
 export const DEMO = !SUPABASE_URL || !SUPABASE_ANON_KEY;
 
 // summers: år (1–4) som följs av en sommar med sommarkurser.
-// hide_done: avklarade kurser syns inte för klasskompisar (pågående och planerade syns alltid).
+// hide_done: avklarade kurser syns inte för andra ESare (pågående och planerade syns alltid).
 export const emptyPlan = () => ({ name: "", start_year: null, hide_done: false, rows: { 1: 3, 2: 3, 3: 3, 4: 3, 5: 3 }, summers: [], items: [] });
 
 const STATUS_OK = new Set(["planned", "ongoing", "done"]);
 const int = (v, lo, hi, d) => { const n = Number(v); return Number.isInteger(n) && n >= lo && n <= hi ? n : d; };
 const txt = (v, max) => (typeof v === "string" ? v.slice(0, max) : v == null ? "" : String(v).slice(0, max));
 
-// Validerar en plan (egen eller en klasskompis) så att trasig eller elak data inte
+// Validerar en plan (egen eller en annan ESare) så att trasig eller elak data inte
 // kan krascha sidan eller smyga in HTML.
 function cleanItem(it) {
   if (!it || typeof it !== "object") return null;
@@ -187,7 +187,7 @@ export async function saveGrades(user, grades) {
 
 // ---------- Exempeldata för demoläget ----------
 
-// Lägger kurser på deras ordinarie plats (rad 0) – räcker för klasskompisvyn.
+// Lägger kurser på deras ordinarie plats (rad 0) – räcker för ESare-vyn.
 const demoItems = (list) => list.map(([code, status], i) => {
   const off = offeringsOf(BY_CODE[code])[0];
   return { id: "d" + i, code, status, year: off.year ?? 5, period: off.periods?.[0] ?? 1, row: 0, span: off.periods?.length ?? 1 };
