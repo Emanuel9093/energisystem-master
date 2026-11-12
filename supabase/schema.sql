@@ -65,3 +65,57 @@ drop policy if exists "Ta bort egen plan" on public.plans;
 create policy "Ta bort egen plan" on public.plans
   for delete to authenticated
   using (user_id = auth.uid());
+
+-- ---------- Kurspoolen (delas av alla inloggade studenter) ----------
+-- Studieplanens kurser och de inbyggda mapparna finns i koden. En rad här
+-- ändrar en befintlig kurs/mapp (samma id) eller lägger till en ny.
+
+create table if not exists public.pool_courses (
+  id         text primary key check (char_length(id) between 1 and 40),
+  data       jsonb not null,
+  updated_by text not null default '',
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.pool_folders (
+  id          text primary key check (char_length(id) between 1 and 40),
+  name        text not null check (char_length(name) between 1 and 80),
+  description text not null default '' check (char_length(description) <= 1000),
+  sort        int not null default 100,
+  updated_by  text not null default '',
+  updated_at  timestamptz not null default now()
+);
+
+alter table public.pool_courses enable row level security;
+alter table public.pool_folders enable row level security;
+
+do $$
+declare t text;
+begin
+  foreach t in array array['pool_courses', 'pool_folders'] loop
+    execute format('drop policy if exists "Läs kurspoolen" on public.%I', t);
+    execute format('create policy "Läs kurspoolen" on public.%I for select to authenticated using (public.email_allowed(auth.jwt() ->> ''email''))', t);
+    execute format('drop policy if exists "Lägg till i kurspoolen" on public.%I', t);
+    execute format('create policy "Lägg till i kurspoolen" on public.%I for insert to authenticated with check (public.email_allowed(auth.jwt() ->> ''email''))', t);
+    execute format('drop policy if exists "Ändra i kurspoolen" on public.%I', t);
+    execute format('create policy "Ändra i kurspoolen" on public.%I for update to authenticated using (public.email_allowed(auth.jwt() ->> ''email'')) with check (public.email_allowed(auth.jwt() ->> ''email''))', t);
+    execute format('drop policy if exists "Ta bort ur kurspoolen" on public.%I', t);
+    execute format('create policy "Ta bort ur kurspoolen" on public.%I for delete to authenticated using (public.email_allowed(auth.jwt() ->> ''email''))', t);
+  end loop;
+end $$;
+
+-- ---------- Betyg (bara den egna raden syns, aldrig för klasskompisar) ----------
+
+create table if not exists public.grades (
+  user_id    uuid primary key default auth.uid() references auth.users (id) on delete cascade,
+  grades     jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.grades enable row level security;
+
+drop policy if exists "Egna betyg" on public.grades;
+create policy "Egna betyg" on public.grades
+  for all to authenticated
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());

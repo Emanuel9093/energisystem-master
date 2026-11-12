@@ -1,6 +1,7 @@
-import { COURSES, BY_CODE, TERM_LABELS, LEVELS, offeringsOf, yearOfTerm } from "./courses.js";
+import { LEVELS, KNOWN_AREAS } from "./courses.js";
 import { evaluate, STATUSES } from "./rules.js";
 import { ALLOWED_EMAIL_DOMAINS } from "./config.js";
+import { pool, buildPool, courseById, coursesIn, courseData, offeringText } from "./pool.js";
 import * as store from "./store.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -9,35 +10,47 @@ const dlg = $("#dlg");
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
 const initials = (name) => (name || "?").split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0].toUpperCase()).join("");
-const uid = () => "i" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 const MAX_ROWS = 6;
 const THICK_ROWS = 3;
+const GRADES = ["3", "4", "5", "G", "VG"];
 
 const ICONS = {
   lock: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`,
   clock: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`,
   trash: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>`,
   plus: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`,
+  folder: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2.5h8.5A1.5 1.5 0 0 1 21 9v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"/></svg>`,
+  grid: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>`,
 };
 
 const state = {
   user: null,
   plan: store.emptyPlan(),
   mates: [],
-  view: "plan",
-  year: Number(sessionGet("es-year")) || 1,
+  poolRows: { courseRows: [], folderRows: [] },
+  grades: {},
+  view: sessionGet("es-view") || "plan",
+  year: Number(sessionGet("es-year")) || 4,
   scope: "all",
   picker: null,
   pickerQuery: "",
-  mateTerm: "advanced",
+  mateFolder: "valbara",
   mateMode: "course",
   mateQuery: "",
+  poolFolder: "programplanen",
+  poolQuery: "",
+  poolArea: "",
+  poolLevel: "",
+  poolSem: "",
   saveState: "",
 };
 
 function sessionGet(k) { try { return sessionStorage.getItem(k); } catch { return null; } }
 function sessionSet(k, v) { try { sessionStorage.setItem(k, v); } catch { /* ignorera */ } }
+const editorName = () => state.plan.name?.trim() || state.user?.email || "Okänd";
 
 // ---------- Start och inloggning ----------
 
@@ -64,9 +77,18 @@ async function afterLogin() {
   }
   $("#tabs").hidden = false;
   try {
-    [state.plan, state.mates] = await Promise.all([store.loadMyPlan(state.user), store.loadClassmates(state.user)]);
+    const [plan, mates, poolRows, grades] = await Promise.all([
+      store.loadMyPlan(state.user), store.loadClassmates(state.user), store.loadPool(), store.loadGrades(state.user),
+    ]);
+    Object.assign(state, { plan, mates, poolRows, grades });
+    buildPool(poolRows.courseRows, poolRows.folderRows);
   } catch (e) {
     return showError(e);
+  }
+  // Nya planer: år 3 fylls i med de obligatoriska kurserna som klara
+  if (state.plan.isNew) {
+    delete state.plan.isNew;
+    fillMandatory(3, "done", true);
   }
   render();
 }
@@ -135,10 +157,16 @@ function updateSaveState() {
   if (el) el.textContent = state.saveState;
 }
 
+let gradeTimer = null;
+function gradesChanged() {
+  clearTimeout(gradeTimer);
+  gradeTimer = setTimeout(() => store.saveGrades(state.user, state.grades).catch((e) => alert("Kunde inte spara betyg: " + e.message)), 400);
+}
+
 // ---------- Hjälpfunktioner för planen ----------
 
-const itemCourse = (it) => (it.code ? BY_CODE[it.code] : null);
-const itemName = (it) => itemCourse(it)?.name ?? it.custom?.name ?? "Okänd kurs";
+const itemCourse = (it) => (it.code ? courseById(it.code) : null);
+const itemName = (it) => itemCourse(it)?.name ?? it.custom?.name ?? it.code ?? "Okänd kurs";
 const itemHp = (it) => itemCourse(it)?.hp ?? (Number(it.custom?.hp) || 0);
 const rowsOf = (y) => state.plan.rows[y] ?? 3;
 const yearItems = (y) => state.plan.items.filter((it) => it.year === y);
@@ -152,13 +180,12 @@ function cellsOf(it) {
   return cells;
 }
 
-function occupied(y, ignoreId) {
+function occupied(y) {
   const map = new Map();
-  for (const it of yearItems(y)) if (it.id !== ignoreId) for (const c of cellsOf(it)) map.set(c, it);
+  for (const it of yearItems(y)) for (const c of cellsOf(it)) map.set(c, it);
   return map;
 }
 
-// Returnerar ett felmeddelande eller null om kursen får plats.
 function placementError(y, period, row, span, thick) {
   if (period + span - 1 > 4) return `Kursen går över ${span} perioder och får inte plats från period ${period}.`;
   const occ = occupied(y);
@@ -170,21 +197,20 @@ function placementError(y, period, row, span, thick) {
   return null;
 }
 
-function placedWhere(code) {
-  return state.plan.items.find((it) => it.code === code);
+const placedWhere = (id) => state.plan.items.find((it) => it.code === id);
+
+function matesFor(id) {
+  return state.mates.map((m) => ({ m, it: m.items.find((x) => x.code === id) })).filter((x) => x.it);
 }
 
-function matesFor(code) {
-  return state.mates
-    .map((m) => ({ m, it: m.items.find((x) => x.code === code) }))
-    .filter((x) => x.it);
-}
-
-// ---------- Huvudrendering ----------
+// ---------- Navigering ----------
 
 function render() {
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.view === state.view));
+  app.onclick = null;
   if (state.view === "plan") renderPlan();
+  else if (state.view === "pool") renderPool();
+  else if (state.view === "grades") renderGrades();
   else renderMates();
 }
 
@@ -192,6 +218,7 @@ $("#tabs").addEventListener("click", (ev) => {
   const b = ev.target.closest("button[data-view]");
   if (!b) return;
   state.view = b.dataset.view;
+  sessionSet("es-view", state.view);
   render();
 });
 
@@ -237,8 +264,7 @@ function yearCard(y) {
   let cells = "";
   for (let r = 0; r < rows; r++) {
     for (let p = 1; p <= 4; p++) {
-      const taken = occ.has(`${r}:${p}`);
-      cells += taken
+      cells += occ.has(`${r}:${p}`)
         ? `<div class="slot taken" style="grid-row:${r + 1};grid-column:${p}"></div>`
         : `<button class="slot" style="grid-row:${r + 1};grid-column:${p}" data-slot="${r}:${p}" aria-label="Lägg till kurs i period ${p}, rad ${r + 1}">${ICONS.plus}</button>`;
     }
@@ -247,7 +273,6 @@ function yearCard(y) {
   }
 
   const pills = items.map((it) => {
-    const c = itemCourse(it);
     const rowSpan = it.thick ? thickRowsOf(y) : 1;
     const icon = it.status === "done" ? ICONS.lock : it.status === "ongoing" ? ICONS.clock : "";
     const name = itemName(it);
@@ -256,7 +281,6 @@ function yearCard(y) {
         style="grid-row:${(it.thick ? 0 : it.row) + 1} / span ${rowSpan};grid-column:${it.period} / span ${it.span}"
         title="${esc(name)} – ${STATUSES[it.status]}">
         ${icon}<span class="pill-name">${esc(name)}</span><span class="hp">${itemHp(it)} hp</span>
-        ${!c ? `<span class="sr-only">(egen kurs)</span>` : ""}
       </button>`;
   }).join("");
 
@@ -311,7 +335,7 @@ function bindPlan() {
       changed();
       return renderPlan();
     }
-    if (t.closest("#fill-year")) { fillMandatory(state.year); return; }
+    if (t.closest("#fill-year")) { fillMandatory(state.year, "planned"); return renderPlan(); }
     if (t.closest("#done-year")) {
       yearItems(state.year).forEach((it) => (it.status = "done"));
       changed();
@@ -337,24 +361,24 @@ function deleteRow(y, r) {
   renderPlan();
 }
 
-function addItem(y, period, row, fields) {
-  const it = { id: uid(), year: y, period, row: fields.thick ? 0 : row, status: "planned", ...fields };
+function addItem(y, period, row, fields, status = "planned") {
+  const it = { id: "i" + uid(), year: y, period, row: fields.thick ? 0 : row, status, ...fields };
   state.plan.items.push(it);
   changed();
   return it;
 }
 
-// Lägger in årets obligatoriska kurser på första lediga plats.
-function fillMandatory(y) {
-  const groupsTaken = new Set(state.plan.items.map((it) => BY_CODE[it.code]?.oneOf).filter(Boolean));
+// Lägger in årets obligatoriska kurser (enligt studieplanen) på första lediga plats.
+function fillMandatory(y, status, silent = false) {
+  const groupsTaken = new Set(state.plan.items.map((it) => courseById(it.code)?.oneOf).filter(Boolean));
   const list = [];
-  for (const c of COURSES) {
-    if (c.type !== "obl" || yearOfTerm(c.term) !== y || placedWhere(c.code)) continue;
+  for (const c of pool.courses) {
+    if (!c.inStudyPlan || c.type !== "obl" || c.year !== y || placedWhere(c.id) || !c.offerings.length) continue;
     if (c.oneOf) {
       if (groupsTaken.has(c.oneOf)) continue;
       groupsTaken.add(c.oneOf);
     }
-    const off = offeringsOf(c).find((o) => o.year === y);
+    const off = c.offerings[0];
     list.push({ c, period: off.periods[0], span: off.periods.length });
   }
   list.sort((a, b) => (b.c.thick ? 1 : 0) - (a.c.thick ? 1 : 0) || a.period - b.period || b.span - a.span);
@@ -363,7 +387,7 @@ function fillMandatory(y) {
   for (const { c, period, span } of list) {
     if (c.thick) {
       if (placementError(y, period, 0, span, true)) skipped.push(c.name);
-      else addItem(y, period, 0, { code: c.code, span, thick: true });
+      else addItem(y, period, 0, { code: c.id, span, thick: true }, status);
       continue;
     }
     let row = [...Array(rowsOf(y)).keys()].find((r) => !placementError(y, period, r, span, false));
@@ -372,10 +396,9 @@ function fillMandatory(y) {
       state.plan.rows[y] = rowsOf(y) + 1;
       row = rowsOf(y) - 1;
     }
-    addItem(y, period, row, { code: c.code, span, thick: false });
+    addItem(y, period, row, { code: c.id, span, thick: false }, status);
   }
-  renderPlan();
-  if (skipped.length) alert(`Fick inte plats med: ${skipped.join(", ")}. Flytta eller ta bort kurser och försök igen.`);
+  if (skipped.length && !silent) alert(`Fick inte plats med: ${skipped.join(", ")}. Flytta eller ta bort kurser och försök igen.`);
 }
 
 // ---------- Kursväljare ----------
@@ -388,27 +411,30 @@ function openPicker(ctx) {
   $("#pick-q")?.focus();
 }
 
+function courseTags(c) {
+  return `
+    <span>${esc(c.code || "")}${c.uni === "SLU" ? " · SLU" : ""}</span><span>${c.hp} hp</span>
+    <span class="tag ${String(c.level).startsWith("A") ? "adv" : ""}">${esc(c.level)}</span>
+    ${c.type === "obl" ? `<span class="tag obl">Obligatorisk</span>` : ""}
+    ${c.type === "ts" ? `<span class="tag ts">Teknik och system</span>` : ""}`;
+}
+
 function pickEntry(c, offering, ctx) {
-  const placed = placedWhere(c.code);
-  const groupTaken = c.oneOf && state.plan.items.find((it) => BY_CODE[it.code]?.oneOf === c.oneOf);
+  const placed = placedWhere(c.id);
+  const groupTaken = c.oneOf && state.plan.items.find((it) => courseById(it.code)?.oneOf === c.oneOf);
   const span = offering?.periods?.length ?? 1;
   const err = placed ? `Redan inlagd i år ${placed.year}` : groupTaken ? `Du har redan ${itemName(groupTaken)}` : placementError(ctx.year, ctx.period, ctx.row, span, !!c.thick);
-  const mates = matesFor(c.code).length;
-  const where = offering?.periods
-    ? `${offering.year ? `År ${offering.year}` : "Tillval"}, period ${offering.periods.join("–")}`
-    : c.term === "S" ? "Sommar" : "Valfri period";
+  const mates = matesFor(c.id).length;
   return `
-    <button class="pick" data-pick="${esc(c.code)}" data-span="${span}" ${err ? "disabled" : ""}>
+    <button class="pick" data-pick="${esc(c.id)}" data-span="${span}" ${err ? "disabled" : ""}>
       <span class="pick-main">
         <span class="pick-name">${esc(c.name)}</span>
         <span class="course-meta">
-          <span>${esc(c.code)}${c.uni === "SLU" ? " · SLU" : ""}</span><span>${c.hp} hp</span>
-          <span class="tag ${c.level.startsWith("A") ? "adv" : ""}">${c.level}</span>
-          ${c.type === "obl" ? `<span class="tag obl">Obligatorisk</span>` : ""}
-          ${c.type === "ts" ? `<span class="tag ts">Teknik och system</span>` : ""}
-          <span>${where}</span>
+          ${courseTags(c)}
+          <span>${offeringText(c).join(", ")}</span>
+          ${c.year ? `<span>Rek. år ${c.year}</span>` : ""}
           ${c.thick ? `<span class="tag">Tar alla tre rader</span>` : ""}
-          ${mates ? `<span class="tag mates">${mates} klasskompis${mates > 1 ? "ar" : ""}</span>` : ""}
+          ${mates ? `<span class="tag mates">${plural(mates, "klasskompis", "klasskompisar")}</span>` : ""}
         </span>
         ${err ? `<span class="pick-err">${esc(err)}</span>` : ""}
       </span>
@@ -418,29 +444,20 @@ function pickEntry(c, offering, ctx) {
 function renderPicker() {
   const ctx = state.picker;
   const q = state.pickerQuery.trim().toLowerCase();
+  const startsHere = (c) => c.offerings.find((o) => o.periods[0] === ctx.period);
   let sections;
 
   if (q) {
-    const hits = COURSES.filter((c) => c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q));
-    sections = [["Sökresultat", hits.map((c) => {
-      const offs = offeringsOf(c);
-      return [c, offs.find((o) => o.year === ctx.year && o.periods?.[0] === ctx.period) || offs[0]];
-    })]];
+    const hits = pool.courses.filter((c) => c.name.toLowerCase().includes(q) || (c.code || "").toLowerCase().includes(q));
+    sections = [["Sökresultat", hits.map((c) => [c, startsHere(c) || c.offerings[0]])]];
   } else {
-    const thisYear = [], other = [], free = [];
-    for (const c of COURSES) {
-      for (const o of offeringsOf(c)) {
-        if (!o.periods) { free.push([c, o]); break; }
-        if (o.periods[0] !== ctx.period) continue;
-        (o.year === ctx.year ? thisYear : other).push([c, o]);
-        break;
-      }
-    }
-    sections = [
-      [`Studieplanen år ${ctx.year}, period ${ctx.period}`, thisYear],
-      [`Andra kurser som börjar i period ${ctx.period}`, other],
-      ["Valfri period och sommar", free],
-    ];
+    const shown = new Set();
+    const take = (list) => list.filter((x) => !shown.has(x[0].id) && shown.add(x[0].id));
+    const here = pool.courses.filter(startsHere).map((c) => [c, startsHere(c)]);
+    sections = [[`Rekommenderat år ${ctx.year}, period ${ctx.period}`, take(here.filter(([c]) => c.year === ctx.year))]];
+    for (const f of pool.folders) sections.push([`${f.name} – börjar i period ${ctx.period}`, take(here.filter(([c]) => c.folders.includes(f.id)))]);
+    sections.push(["Övriga kurser som börjar i perioden", take(here)]);
+    sections.push(["Valfri period och sommar", take(pool.courses.filter((c) => c.anyPeriod || c.summer).map((c) => [c, null]))]);
   }
 
   const body = sections
@@ -456,10 +473,11 @@ function renderPicker() {
       </div>
       <button class="icon-btn" data-close aria-label="Stäng">✕</button>
     </div>
-    <input type="search" id="pick-q" placeholder="Sök bland alla kurser" value="${esc(state.pickerQuery)}">
+    <input type="search" id="pick-q" placeholder="Sök bland alla kurser i kurspoolen" value="${esc(state.pickerQuery)}">
     <div class="pick-list">${body}</div>
     <details class="custom-box">
-      <summary>Lägg till egen kurs (utbyte, fristående kurs …)</summary>
+      <summary>Lägg till en privat kurs (syns bara i din plan)</summary>
+      <p class="muted small">Vill du att andra ska kunna välja kursen? Lägg till den i Kurspoolen i stället.</p>
       <form id="custom-form" class="custom-form">
         <label class="field wide">Kursnamn<input name="name" required></label>
         <label class="field">Kurskod<input name="code" placeholder="valfritt"></label>
@@ -499,13 +517,16 @@ function renderPicker() {
   };
 }
 
+// Dialogen används av kursväljaren, kursdetaljer och kurspoolens formulär.
+let dlgHandler = null;
 dlg.addEventListener("click", (ev) => {
   if (ev.target === dlg || ev.target.closest("[data-close]")) return dlg.close();
+  if (dlgHandler) return dlgHandler(ev);
   const pick = ev.target.closest("[data-pick]");
   if (pick && !pick.disabled && state.picker) {
-    const c = BY_CODE[pick.dataset.pick];
+    const c = courseById(pick.dataset.pick);
     const { year, period, row } = state.picker;
-    addItem(year, period, row, { code: c.code, span: Number(pick.dataset.span), thick: !!c.thick });
+    addItem(year, period, row, { code: c.id, span: Number(pick.dataset.span), thick: !!c.thick });
     dlg.close();
     renderPlan();
     return;
@@ -526,9 +547,15 @@ dlg.addEventListener("click", (ev) => {
     renderPlan();
   }
 });
-dlg.addEventListener("close", () => { state.picker = null; });
+dlg.addEventListener("close", () => { state.picker = null; dlgHandler = null; });
 
-// ---------- Kursdetaljer ----------
+function openDialog(html, handler = null) {
+  dlgHandler = handler;
+  dlg.innerHTML = html;
+  if (!dlg.open) dlg.showModal();
+}
+
+// ---------- Kursdetaljer i planen ----------
 
 function openItem(id) {
   const it = state.plan.items.find((x) => x.id === id);
@@ -536,9 +563,9 @@ function openItem(id) {
   state.picker = null;
   const c = itemCourse(it);
   const x = it.custom || {};
-  const mates = c ? matesFor(c.code) : [];
+  const mates = c ? matesFor(c.id) : [];
   const periods = Array.from({ length: it.span }, (_, i) => it.period + i).join("–");
-  dlg.innerHTML = `
+  openDialog(`
     <div class="dlg-head">
       <div>
         <h2>${esc(itemName(it))}</h2>
@@ -547,22 +574,21 @@ function openItem(id) {
       <button class="icon-btn" data-close aria-label="Stäng">✕</button>
     </div>
     <div class="course-meta">
-      ${c ? `<span>${esc(c.code)}${c.uni === "SLU" ? " · SLU" : ""}</span><span>${c.hp} hp</span><span class="tag ${c.level.startsWith("A") ? "adv" : ""}">${c.level}</span>
-        ${c.teknik ? `<span class="tag">Teknik</span>` : ""}${c.type === "obl" ? `<span class="tag obl">Obligatorisk</span>` : ""}${c.type === "ts" ? `<span class="tag ts">Teknik och system</span>` : ""}`
-      : `${x.code ? `<span>${esc(x.code)}</span>` : ""}<span>${Number(x.hp) || 0} hp</span><span class="tag">${esc(x.level)}</span>${x.teknik ? `<span class="tag">Teknik</span>` : ""}<span class="tag">Utanför studieplanen</span>`}
+      ${c ? `${courseTags(c)}${c.areas.map((a) => `<span class="tag">${esc(a)}</span>`).join("")}`
+      : `${x.code ? `<span>${esc(x.code)}</span>` : ""}<span>${Number(x.hp) || 0} hp</span><span class="tag">${esc(x.level)}</span>${x.teknik ? `<span class="tag">Teknik</span>` : ""}<span class="tag">Privat kurs</span>`}
     </div>
+    ${c?.prereq ? `<p class="small"><strong>Behörighet:</strong> ${esc(c.prereq)}</p>` : ""}
     ${c?.note ? `<p class="small muted">${esc(c.note)}</p>` : ""}
     <h3 class="pick-h">Status</h3>
     <div class="seg" role="group" aria-label="Status">
-      ${Object.entries(STATUSES).reverse().map(([k, l]) => `<button data-set-status="${k}" data-id="${esc(it.id)}" data-status="${k}" class="${it.status === k ? "on" : ""}" aria-pressed="${it.status === k}">${l}</button>`).join("")}
+      ${Object.entries(STATUSES).reverse().map(([k, l]) => `<button data-set-status="${k}" data-id="${esc(it.id)}" class="${it.status === k ? "on" : ""}" aria-pressed="${it.status === k}">${l}</button>`).join("")}
     </div>
     ${c ? `<h3 class="pick-h">Klasskompisar som läser kursen</h3>
       ${mates.length ? `<div class="people">${mates.map(({ m, it: mi }) => personChip(m, mi.status)).join("")}</div>` : `<p class="muted small">Ingen ännu.</p>`}` : ""}
     <div class="dlg-foot">
       <button class="btn danger" data-remove="${esc(it.id)}">Ta bort från planen</button>
       <button class="btn" data-close>Klar</button>
-    </div>`;
-  if (!dlg.open) dlg.showModal();
+    </div>`);
 }
 
 // ---------- Examenskrav ----------
@@ -610,12 +636,372 @@ function renderReqs() {
   $("#reqs").querySelectorAll("[data-scope]").forEach((b) => (b.onclick = (ev) => { ev.stopPropagation(); state.scope = b.dataset.scope; renderReqs(); }));
 }
 
-// ---------- Klasskompisar ----------
+// ---------- Kurspoolen ----------
 
-const MATE_FILTERS = [
-  ["advanced", "Åk 4–5 och tillval"],
-  [7, "Termin 7"], [8, "Termin 8"], [9, "Termin 9"], [10, "Termin 10"], ["X", "Tillval"], ["custom", "Egna kurser"],
-];
+const folderHp = (id) => coursesIn(id).reduce((s, c) => s + c.hp, 0);
+
+function renderPool() {
+  const fid = state.poolFolder;
+  const folder = pool.folders.find((f) => f.id === fid);
+  if (fid !== "all" && !folder) state.poolFolder = "programplanen";
+  const q = state.poolQuery.trim().toLowerCase();
+  let list = fid === "all" ? pool.courses : coursesIn(fid);
+  list = list.filter((c) =>
+    (!q || c.name.toLowerCase().includes(q) || (c.code || "").toLowerCase().includes(q) || c.prereq.toLowerCase().includes(q)) &&
+    (!state.poolArea || c.areas.includes(state.poolArea)) &&
+    (!state.poolLevel || String(c.level).startsWith(state.poolLevel)) &&
+    (!state.poolSem || (state.poolSem === "any" ? c.anyPeriod || c.summer : c.offerings.some((o) => o.sem === state.poolSem))));
+  list.sort((a, b) => (a.year ?? 9) - (b.year ?? 9) || (a.offerings[0]?.periods[0] ?? 9) - (b.offerings[0]?.periods[0] ?? 9) || a.name.localeCompare(b.name, "sv"));
+
+  const areas = [...new Set(pool.courses.flatMap((c) => c.areas))].sort((a, b) => a.localeCompare(b, "sv"));
+
+  app.innerHTML = `
+    <div class="pool-layout">
+      <aside class="folders">
+        <button class="folder ${fid === "all" ? "active" : ""}" data-folder="all">${ICONS.grid}<span>Alla kurser</span><small>${pool.courses.length}</small></button>
+        ${pool.folders.map((f) => `
+          <button class="folder ${fid === f.id ? "active" : ""}" data-folder="${esc(f.id)}">${ICONS.folder}<span>${esc(f.name)}</span><small>${coursesIn(f.id).length}</small></button>`).join("")}
+        <button class="btn small ghost" id="new-folder">${ICONS.plus} Ny mapp</button>
+      </aside>
+      <section class="stack">
+        <div class="card folder-head">
+          <div class="folder-title">
+            <h1>${fid === "all" ? "Alla kurser" : esc(folder.name)}</h1>
+            <span class="muted">${plural(list.length, "kurs", "kurser")}${fid !== "all" ? ` · totalt ${folderHp(fid)} hp` : ""}</span>
+          </div>
+          <p class="folder-desc">${fid === "all" ? "Alla kurser i kurspoolen, från alla mappar." : esc(folder.description) || `<span class="muted">Ingen beskrivning.</span>`}</p>
+          <div class="toolbar">
+            ${fid !== "all" ? `<button class="btn small" id="edit-folder">Ändra mapp</button>` : ""}
+            <button class="btn small primary" id="new-course">${ICONS.plus} Ny kurs${fid !== "all" ? " i mappen" : ""}</button>
+            ${folder?.updated_by ? `<span class="muted small">Senast ändrad av ${esc(folder.updated_by)}</span>` : ""}
+          </div>
+        </div>
+        <div class="toolbar">
+          <input type="search" id="pool-q" placeholder="Sök namn, kurskod eller behörighet" value="${esc(state.poolQuery)}">
+          <select id="pool-area" aria-label="Huvudområde"><option value="">Alla huvudområden</option>${areas.map((a) => `<option ${a === state.poolArea ? "selected" : ""}>${esc(a)}</option>`).join("")}</select>
+          <select id="pool-level" aria-label="Nivå"><option value="">Alla nivåer</option><option value="G" ${state.poolLevel === "G" ? "selected" : ""}>Grundnivå</option><option value="A" ${state.poolLevel === "A" ? "selected" : ""}>Avancerad nivå</option></select>
+          <select id="pool-sem" aria-label="Termin"><option value="">HT och VT</option>${[["HT", "Höstterminen"], ["VT", "Vårterminen"], ["any", "Valfri period/sommar"]].map(([v, l]) => `<option value="${v}" ${state.poolSem === v ? "selected" : ""}>${l}</option>`).join("")}</select>
+        </div>
+        <div class="pool-list">
+          ${list.length ? list.map(poolCourseCard).join("") : `<div class="card empty">Inga kurser matchar.</div>`}
+        </div>
+      </section>
+    </div>`;
+
+  bindPool();
+}
+
+function poolCourseCard(c) {
+  const mates = matesFor(c.id).length;
+  const mine = placedWhere(c.id);
+  const folders = pool.folders.filter((f) => c.folders.includes(f.id));
+  return `
+    <details class="card pool-course">
+      <summary>
+        <div class="pc-main">
+          <div class="course-name">${esc(c.name)}</div>
+          <div class="course-meta">
+            ${courseTags(c)}
+            ${c.areas.map((a) => `<span class="tag area">${esc(a)}</span>`).join("")}
+          </div>
+        </div>
+        <div class="pc-side">
+          ${offeringText(c).map((t) => `<span class="sem">${esc(t)}</span>`).join("")}
+          ${mine ? `<span class="tag ts">I din plan</span>` : ""}
+          ${mates ? `<span class="tag mates">${plural(mates, "klasskompis", "klasskompisar")}</span>` : ""}
+        </div>
+      </summary>
+      <div class="pc-body">
+        <div class="pc-prereq"><strong>Behörighet</strong><p>${c.prereq ? esc(c.prereq) : `<span class="muted">Inte ifyllt ännu. Klicka på Ändra och lägg till.</span>`}</p></div>
+        ${c.note ? `<p class="small muted">${esc(c.note)}</p>` : ""}
+        <div class="course-meta">
+          ${c.year ? `<span>Rekommenderat år ${c.year}</span>` : ""}
+          ${folders.map((f) => `<span class="tag">${ICONS.folder} ${esc(f.name)}</span>`).join("")}
+          ${c.url ? `<a href="${esc(c.url)}" target="_blank" rel="noopener">Kurssida ↗</a>` : ""}
+          ${c.updated_by ? `<span>Ändrad av ${esc(c.updated_by)}</span>` : ""}
+        </div>
+        <div class="toolbar">
+          <button class="btn small" data-edit-course="${esc(c.id)}">Ändra</button>
+          <button class="btn small" data-course-folders="${esc(c.id)}">${ICONS.folder} Mappar</button>
+          ${pool.overridden.has(c.id) ? `<button class="btn small ghost" data-reset-course="${esc(c.id)}">Återställ till studieplanen</button>` : ""}
+          ${!pool.seedIds.has(c.id) ? `<button class="btn small ghost danger" data-delete-course="${esc(c.id)}">Ta bort kursen</button>` : ""}
+        </div>
+      </div>
+    </details>`;
+}
+
+function bindPool() {
+  const rerenderKeepFocus = (id) => {
+    const el = $(id);
+    const pos = el.selectionStart;
+    renderPool();
+    const n = $(id);
+    n.focus();
+    if (pos != null) n.setSelectionRange(pos, pos);
+  };
+  $("#pool-q").oninput = (e) => { state.poolQuery = e.target.value; rerenderKeepFocus("#pool-q"); };
+  $("#pool-area").onchange = (e) => { state.poolArea = e.target.value; renderPool(); };
+  $("#pool-level").onchange = (e) => { state.poolLevel = e.target.value; renderPool(); };
+  $("#pool-sem").onchange = (e) => { state.poolSem = e.target.value; renderPool(); };
+
+  app.onclick = async (ev) => {
+    const t = ev.target;
+    const f = t.closest("[data-folder]");
+    if (f) { state.poolFolder = f.dataset.folder; return renderPool(); }
+    if (t.closest("#new-folder")) return openFolderEditor(null);
+    if (t.closest("#edit-folder")) return openFolderEditor(pool.folders.find((x) => x.id === state.poolFolder));
+    if (t.closest("#new-course")) return openCourseEditor(null);
+    const e1 = t.closest("[data-edit-course]");
+    if (e1) return openCourseEditor(courseById(e1.dataset.editCourse));
+    const e2 = t.closest("[data-course-folders]");
+    if (e2) return openFolderPicker(courseById(e2.dataset.courseFolders));
+    const e3 = t.closest("[data-reset-course]");
+    if (e3 && confirm("Återställ kursen till uppgifterna från studieplanen? Ändringar och mappval försvinner.")) {
+      await poolWrite(() => store.deletePoolCourse(e3.dataset.resetCourse), () => {
+        state.poolRows.courseRows = state.poolRows.courseRows.filter((r) => r.id !== e3.dataset.resetCourse);
+      });
+    }
+    const e4 = t.closest("[data-delete-course]");
+    if (e4) {
+      const c = courseById(e4.dataset.deleteCourse);
+      if (!confirm(`Ta bort ${c.name} ur kurspoolen för alla?`)) return;
+      await poolWrite(() => store.deletePoolCourse(c.id), () => {
+        state.poolRows.courseRows = state.poolRows.courseRows.filter((r) => r.id !== c.id);
+      });
+    }
+  };
+}
+
+// Kör en skrivning mot poolen, uppdatera lokalt och rita om.
+async function poolWrite(save, applyLocal) {
+  try {
+    await save();
+    applyLocal();
+    buildPool(state.poolRows.courseRows, state.poolRows.folderRows);
+    renderPool();
+    return true;
+  } catch (e) {
+    alert("Kunde inte spara: " + e.message);
+    return false;
+  }
+}
+
+async function saveCourse(c) {
+  const row = { id: c.id, data: courseData(c), updated_by: editorName(), updated_at: new Date().toISOString() };
+  return poolWrite(() => store.savePoolCourse(row.id, row.data, row.updated_by), () => {
+    state.poolRows.courseRows = [...state.poolRows.courseRows.filter((r) => r.id !== row.id), row];
+  });
+}
+
+function openFolderEditor(folder) {
+  const isNew = !folder;
+  openDialog(`
+    <form id="folder-form">
+      <div class="dlg-head">
+        <h2>${isNew ? "Ny mapp" : "Ändra mapp"}</h2>
+        <button type="button" class="icon-btn" data-close aria-label="Stäng">✕</button>
+      </div>
+      <div class="form-grid">
+        <label class="field wide">Namn<input name="name" required maxlength="80" value="${esc(folder?.name)}"></label>
+        <label class="field wide">Beskrivning<textarea name="description" rows="4" maxlength="1000">${esc(folder?.description)}</textarea></label>
+      </div>
+      <div class="dlg-foot">
+        ${!isNew && !folder.builtin ? `<button type="button" class="btn danger" id="delete-folder">Ta bort mappen</button>` : "<span></span>"}
+        <button class="btn primary" type="submit">Spara</button>
+      </div>
+    </form>`, async (ev) => {
+    if (ev.target.closest("#delete-folder")) {
+      if (!confirm(`Ta bort mappen ${folder.name}? Kurserna finns kvar i kurspoolen.`)) return;
+      dlg.close();
+      await poolWrite(() => store.deletePoolFolder(folder.id), () => {
+        state.poolRows.folderRows = state.poolRows.folderRows.filter((r) => r.id !== folder.id);
+        state.poolFolder = "programplanen";
+      });
+    }
+  });
+  $("#folder-form").onsubmit = async (ev) => {
+    ev.preventDefault();
+    const fd = new FormData(ev.target);
+    const f = { id: folder?.id || "m-" + uid(), name: fd.get("name").trim(), description: fd.get("description").trim(), sort: folder?.sort ?? 100 };
+    const row = { ...f, updated_by: editorName(), updated_at: new Date().toISOString() };
+    dlg.close();
+    await poolWrite(() => store.savePoolFolder(f, row.updated_by), () => {
+      state.poolRows.folderRows = [...state.poolRows.folderRows.filter((r) => r.id !== f.id), row];
+      state.poolFolder = f.id;
+    });
+  };
+}
+
+function openFolderPicker(c) {
+  openDialog(`
+    <form id="fp-form">
+      <div class="dlg-head">
+        <div><h2>Mappar</h2><p class="muted small">${esc(c.name)}</p></div>
+        <button type="button" class="icon-btn" data-close aria-label="Stäng">✕</button>
+      </div>
+      <div class="checks">
+        ${pool.folders.map((f) => `<label class="check"><input type="checkbox" name="f" value="${esc(f.id)}" ${c.folders.includes(f.id) ? "checked" : ""}> ${esc(f.name)}</label>`).join("")}
+      </div>
+      <div class="dlg-foot"><span></span><button class="btn primary" type="submit">Spara</button></div>
+    </form>`);
+  $("#fp-form").onsubmit = async (ev) => {
+    ev.preventDefault();
+    const folders = new FormData(ev.target).getAll("f");
+    dlg.close();
+    await saveCourse({ ...c, folders });
+  };
+}
+
+const PERIOD_OPTS = { HT: [["", "Ges inte"], ["1", "Period 1"], ["2", "Period 2"], ["1,2", "Period 1–2"], ["2,3", "Period 2–3 (över årsskiftet)"]], VT: [["", "Ges inte"], ["3", "Period 3"], ["4", "Period 4"], ["3,4", "Period 3–4"]] };
+
+function openCourseEditor(c) {
+  const isNew = !c;
+  const cur = c || { name: "", code: "", hp: 5, level: "A1N", areas: ["Teknik"], prereq: "", url: "", note: "", offerings: [], anyPeriod: false, summer: false, year: null, folders: state.poolFolder !== "all" ? [state.poolFolder] : [] };
+  const semVal = (sem) => cur.offerings.find((o) => o.sem === sem)?.periods.join(",") || "";
+  const extraAreas = cur.areas.filter((a) => !KNOWN_AREAS.includes(a));
+  openDialog(`
+    <form id="course-form">
+      <div class="dlg-head">
+        <div><h2>${isNew ? "Ny kurs i kurspoolen" : "Ändra kurs"}</h2>${!isNew && c.inStudyPlan ? `<p class="muted small">Ändringen syns för alla. Du kan alltid återställa till studieplanen.</p>` : `<p class="muted small">Kursen blir synlig för alla i kurspoolen.</p>`}</div>
+        <button type="button" class="icon-btn" data-close aria-label="Stäng">✕</button>
+      </div>
+      <div class="form-grid">
+        <label class="field wide">Kursnamn<input name="name" required maxlength="120" value="${esc(cur.name)}"></label>
+        <label class="field">Kurskod<input name="code" maxlength="20" value="${esc(cur.code)}" ${!isNew && c.inStudyPlan ? "readonly" : ""}></label>
+        <label class="field">hp<input name="hp" type="number" min="0.5" step="0.5" required value="${esc(cur.hp)}"></label>
+        <label class="field">Nivå<select name="level">${[...LEVELS, "GXX"].map((l) => `<option ${l === cur.level ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+        <label class="field">Rekommenderat år<select name="year"><option value="">Inget</option>${[1, 2, 3, 4, 5].map((y) => `<option ${y === cur.year ? "selected" : ""}>${y}</option>`).join("")}</select></label>
+        <fieldset class="wide">
+          <legend>När ges kursen?</legend>
+          <div class="form-grid">
+            <label class="field">Höstterminen (HT)<select name="HT">${PERIOD_OPTS.HT.map(([v, l]) => `<option value="${v}" ${v === semVal("HT") ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+            <label class="field">Vårterminen (VT)<select name="VT">${PERIOD_OPTS.VT.map(([v, l]) => `<option value="${v}" ${v === semVal("VT") ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+            <label class="check"><input type="checkbox" name="anyPeriod" ${cur.anyPeriod ? "checked" : ""}> Valfri period</label>
+            <label class="check"><input type="checkbox" name="summer" ${cur.summer ? "checked" : ""}> Sommarkurs</label>
+          </div>
+        </fieldset>
+        <fieldset class="wide">
+          <legend>Huvudområden</legend>
+          <div class="checks cols">
+            ${KNOWN_AREAS.map((a) => `<label class="check"><input type="checkbox" name="areas" value="${esc(a)}" ${cur.areas.includes(a) ? "checked" : ""}> ${esc(a)}</label>`).join("")}
+          </div>
+          <label class="field">Annat huvudområde (kommaseparerat)<input name="otherAreas" value="${esc(extraAreas.join(", "))}"></label>
+        </fieldset>
+        <label class="field wide">Behörighet<textarea name="prereq" rows="4" maxlength="1500">${esc(cur.prereq)}</textarea></label>
+        <label class="field wide">Länk till kurssidan<input name="url" type="url" value="${esc(cur.url)}" placeholder="https://www.uu.se/utbildning/kurs?query=…"></label>
+        <label class="field wide">Anteckning<input name="note" maxlength="300" value="${esc(cur.note)}"></label>
+        <fieldset class="wide">
+          <legend>Mappar</legend>
+          <div class="checks">${pool.folders.map((f) => `<label class="check"><input type="checkbox" name="folders" value="${esc(f.id)}" ${cur.folders.includes(f.id) ? "checked" : ""}> ${esc(f.name)}</label>`).join("")}</div>
+        </fieldset>
+        <p class="pick-err wide" id="course-err"></p>
+      </div>
+      <div class="dlg-foot"><button type="button" class="btn" data-close>Avbryt</button><button class="btn primary" type="submit">Spara</button></div>
+    </form>`);
+
+  $("#course-form").onsubmit = async (ev) => {
+    ev.preventDefault();
+    const fd = new FormData(ev.target);
+    const offerings = ["HT", "VT"].filter((s) => fd.get(s)).map((s) => ({ sem: s, periods: fd.get(s).split(",").map(Number) }));
+    const areas = [...fd.getAll("areas"), ...fd.get("otherAreas").split(",").map((s) => s.trim()).filter(Boolean)];
+    const code = fd.get("code").trim().toUpperCase();
+    let id = c?.id;
+    if (isNew) {
+      id = code && !courseById(code) ? code : "u-" + uid();
+    }
+    const next = {
+      ...cur, id, code, name: fd.get("name").trim(), hp: Number(fd.get("hp")), level: fd.get("level"),
+      year: fd.get("year") ? Number(fd.get("year")) : null, offerings,
+      anyPeriod: fd.get("anyPeriod") === "on", summer: fd.get("summer") === "on",
+      areas: [...new Set(areas)], prereq: fd.get("prereq").trim(), url: fd.get("url").trim(), note: fd.get("note").trim(),
+      folders: fd.getAll("folders"),
+    };
+    if (!offerings.length && !next.anyPeriod && !next.summer) {
+      $("#course-err").textContent = "Välj minst en termin, valfri period eller sommar.";
+      return;
+    }
+    dlg.close();
+    await saveCourse(next);
+  };
+}
+
+// ---------- Mina betyg ----------
+
+const gradeKey = (it) => it.code || it.id;
+
+function renderGrades() {
+  const done = state.plan.items.filter((it) => it.status === "done").sort((a, b) => a.year - b.year || a.period - b.period || a.row - b.row);
+  const seen = new Set();
+  const rows = done.filter((it) => !seen.has(gradeKey(it)) && seen.add(gradeKey(it)));
+
+  let hpNum = 0, sum = 0, unweightedSum = 0, nNum = 0, missing = 0;
+  const dist = { 3: 0, 4: 0, 5: 0 };
+  for (const it of rows) {
+    const g = state.grades[gradeKey(it)];
+    if (!g) { missing++; continue; }
+    if (["3", "4", "5"].includes(g)) {
+      const hp = itemHp(it);
+      hpNum += hp; sum += hp * Number(g); unweightedSum += Number(g); nNum++;
+      dist[g] += hp;
+    }
+  }
+  const gpa = hpNum ? sum / hpNum : null;
+  const maxDist = Math.max(1, ...Object.values(dist));
+
+  const byYear = [1, 2, 3, 4, 5].map((y) => {
+    const list = rows.filter((it) => it.year === y);
+    if (!list.length) return "";
+    return `
+      <div class="card grade-year">
+        <h2>År ${y}</h2>
+        ${list.map((it) => {
+          const g = state.grades[gradeKey(it)] || "";
+          const c = itemCourse(it);
+          return `
+            <div class="grade-row">
+              <div>
+                <div class="course-name">${esc(itemName(it))}</div>
+                <div class="course-meta"><span>${esc(c?.code || it.custom?.code || "")}</span><span>${itemHp(it)} hp</span></div>
+              </div>
+              <div class="seg grade-seg" role="group" aria-label="Betyg för ${esc(itemName(it))}">
+                ${GRADES.map((v) => `<button data-grade="${esc(gradeKey(it))}" data-value="${v}" class="${g === v ? "on" : ""}" aria-pressed="${g === v}">${v}</button>`).join("")}
+              </div>
+            </div>`;
+        }).join("")}
+      </div>`;
+  }).join("");
+
+  app.innerHTML = `
+    <div class="stack">
+      <div>
+        <h1>Mina betyg</h1>
+        <p class="muted" style="margin:0">Fyll i betyg för kurser som är markerade som klara i din plan. Betygen sparas bara för dig och visas aldrig för klasskompisar.</p>
+      </div>
+      <div class="stats">
+        <div class="card stat main"><span class="stat-label">Viktat snitt</span><span class="stat-value">${gpa ? gpa.toFixed(2) : "–"}</span><span class="muted small">viktat med hp, betyg 3–5</span></div>
+        <div class="card stat"><span class="stat-label">Oviktat snitt</span><span class="stat-value">${nNum ? (unweightedSum / nNum).toFixed(2) : "–"}</span><span class="muted small">${plural(nNum, "kurs", "kurser")}</span></div>
+        <div class="card stat"><span class="stat-label">hp med sifferbetyg</span><span class="stat-value">${hpNum}</span><span class="muted small">${missing ? `${plural(missing, "kurs", "kurser")} utan betyg` : "Alla klara kurser har betyg"}</span></div>
+        <div class="card stat dist">
+          <span class="stat-label">Fördelning (hp)</span>
+          ${["5", "4", "3"].map((g) => `<div class="dist-row"><span>${g}</span><div class="dist-bar"><i style="width:${(dist[g] / maxDist) * 100}%"></i></div><span class="muted">${dist[g]}</span></div>`).join("")}
+        </div>
+      </div>
+      ${byYear || `<div class="card empty">Inga kurser är markerade som klara ännu. Markera kurser som klara under Min plan.</div>`}
+      <p class="muted small">G och VG räknas inte in i snittet. Klicka på ett valt betyg igen för att ta bort det.</p>
+    </div>`;
+
+  app.onclick = (ev) => {
+    const b = ev.target.closest("[data-grade]");
+    if (!b) return;
+    const k = b.dataset.grade;
+    if (state.grades[k] === b.dataset.value) delete state.grades[k];
+    else state.grades[k] = b.dataset.value;
+    gradesChanged();
+    renderGrades();
+  };
+}
+
+// ---------- Klasskompisar ----------
 
 function personChip(m, status, me = false) {
   return `<span class="person ${me ? "me" : ""}" title="${esc(STATUSES[status] || "")}">
@@ -625,25 +1011,26 @@ function personChip(m, status, me = false) {
 function renderMates() {
   const me = { name: state.plan.name || "Du", items: state.plan.items };
   const everyone = [...state.mates.map((m) => ({ m, me: false })), { m: me, me: true }];
-  const f = state.mateTerm;
+  const f = state.mateFolder;
   const q = state.mateQuery.toLowerCase();
 
+  const courseList = f === "valbara"
+    ? pool.courses.filter((c) => !(c.inStudyPlan && c.type === "obl" && (c.year ?? 9) <= 3))
+    : f === "custom" ? [] : coursesIn(f);
+
   const items = [];
-  if (f !== "custom") {
-    const terms = f === "advanced" ? [7, 8, 9, 10, "X", "S"] : [f];
-    for (const c of COURSES.filter((x) => terms.includes(x.term) && (x.type !== "obl" || x.term >= 7))) {
-      const takers = everyone.map((e) => ({ ...e, it: e.m.items.find((x) => x.code === c.code) })).filter((e) => e.it);
-      if (!takers.some((t) => !t.me)) continue;
-      items.push({ name: c.name, meta: `${c.code} · ${c.hp} hp · ${c.level} · ${TERM_LABELS[c.term]}, period ${c.period}`, takers: takers.map((t) => ({ ...t, status: t.it.status })) });
-    }
+  for (const c of courseList) {
+    const takers = everyone.map((e) => ({ ...e, it: e.m.items.find((x) => x.code === c.id) })).filter((e) => e.it);
+    if (!takers.some((t) => !t.me)) continue;
+    items.push({ name: c.name, meta: `${c.code || ""} · ${c.hp} hp · ${c.level} · ${offeringText(c).join(", ")}`, takers: takers.map((t) => ({ ...t, status: t.it.status })) });
   }
-  if (f === "custom" || f === "advanced") {
+  if (f === "custom" || f === "valbara") {
     const map = new Map();
     for (const { m, me: isMe } of everyone) {
       for (const it of m.items.filter((x) => x.custom)) {
         const x = it.custom;
         const key = (x.code || x.name).trim().toLowerCase();
-        if (!map.has(key)) map.set(key, { name: x.name, meta: `${x.code ? x.code + " · " : ""}${x.hp} hp · ${x.level} · utanför studieplanen`, takers: [] });
+        if (!map.has(key)) map.set(key, { name: x.name, meta: `${x.code ? x.code + " · " : ""}${x.hp} hp · ${x.level} · privat kurs`, takers: [] });
         map.get(key).takers.push({ m, me: isMe, status: it.status });
       }
     }
@@ -665,9 +1052,9 @@ function renderMates() {
     .filter((m) => !q || m.name.toLowerCase().includes(q))
     .map((m) => {
       const list = m.items
-        .filter((it) => it.custom || (BY_CODE[it.code] && BY_CODE[it.code].type !== "obl"))
+        .filter((it) => it.custom || (courseById(it.code) && !(courseById(it.code).type === "obl" && (courseById(it.code).year ?? 9) <= 3)))
         .sort((a, b) => a.year - b.year || a.period - b.period)
-        .map((it) => ({ name: itemNameOf(it), meta: `År ${it.year} · P${it.period}${it.span > 1 ? "–" + (it.period + it.span - 1) : ""}`, status: it.status }));
+        .map((it) => ({ name: itemName(it), meta: `År ${it.year} · P${it.period}${it.span > 1 ? "–" + (it.period + it.span - 1) : ""}`, status: it.status }));
       return `
         <div class="card person-card">
           <h3><span class="avatar">${esc(initials(m.name))}</span>${esc(m.name)}</h3>
@@ -676,18 +1063,20 @@ function renderMates() {
         </div>`;
     }).join("");
 
+  const opts = [["valbara", "Alla utom obligatoriska åk 1–3"], ...pool.folders.map((x) => [x.id, x.name]), ["custom", "Privata kurser"]];
+
   app.innerHTML = `
     <div class="stack">
       <div>
         <h1>Klasskompisar</h1>
-        <p class="muted" style="margin:0">Se vilka valbara kurser andra läser eller planerar. ${state.mates.length} klasskompis${state.mates.length === 1 ? "" : "ar"} delar sina kurser.</p>
+        <p class="muted" style="margin:0">Se vilka kurser andra läser eller planerar. ${plural(state.mates.length, "klasskompis", "klasskompisar")} delar sina kurser.</p>
       </div>
       <div class="toolbar">
         <div class="seg" role="group" aria-label="Visa">
-          <button data-mode="course" data-status="" class="${state.mateMode === "course" ? "on" : ""}">Per kurs</button>
-          <button data-mode="person" data-status="" class="${state.mateMode === "person" ? "on" : ""}">Per person</button>
+          <button data-mode="course" class="${state.mateMode === "course" ? "on" : ""}">Per kurs</button>
+          <button data-mode="person" class="${state.mateMode === "person" ? "on" : ""}">Per person</button>
         </div>
-        ${state.mateMode === "course" ? `<select id="mate-term" aria-label="Termin">${MATE_FILTERS.map(([v, l]) => `<option value="${v}" ${String(v) === String(f) ? "selected" : ""}>${l}</option>`).join("")}</select>` : ""}
+        ${state.mateMode === "course" ? `<select id="mate-folder" aria-label="Urval">${opts.map(([v, l]) => `<option value="${esc(v)}" ${v === f ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>` : ""}
         <input type="search" id="mate-q" placeholder="Sök kurs eller namn" value="${esc(state.mateQuery)}">
       </div>
       <div class="legend"><span><span class="dot done"></span> Klar</span><span><span class="dot ongoing"></span> Läser nu</span><span><span class="dot planned"></span> Planerar</span></div>
@@ -698,8 +1087,8 @@ function renderMates() {
     const b = ev.target.closest("[data-mode]");
     if (b) { state.mateMode = b.dataset.mode; renderMates(); }
   };
-  const sel = $("#mate-term");
-  if (sel) sel.onchange = () => { state.mateTerm = isNaN(sel.value) ? sel.value : Number(sel.value); renderMates(); };
+  const sel = $("#mate-folder");
+  if (sel) sel.onchange = () => { state.mateFolder = sel.value; renderMates(); };
   const mq = $("#mate-q");
   mq.oninput = () => {
     state.mateQuery = mq.value;
@@ -709,10 +1098,6 @@ function renderMates() {
     n.focus();
     n.setSelectionRange(pos, pos);
   };
-}
-
-function itemNameOf(it) {
-  return it.code ? BY_CODE[it.code]?.name ?? it.code : it.custom?.name ?? "";
 }
 
 start();

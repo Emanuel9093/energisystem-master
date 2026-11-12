@@ -53,19 +53,19 @@ const fromRow = (r) => normalize({
 export async function loadMyPlan(user) {
   if (DEMO) {
     try {
-      const raw = localStorage.getItem("es-master-plan-v2");
+      const raw = localStorage.getItem("es-master-plan-v3");
       if (raw) return normalize(JSON.parse(raw));
     } catch { /* tomt */ }
-    return { ...emptyPlan(), name: "" };
+    return { ...emptyPlan(), isNew: true };
   }
   const { data, error } = await (await client()).from("plans").select("*").eq("user_id", user.id).maybeSingle();
   if (error) throw error;
-  return data ? fromRow(data) : emptyPlan();
+  return data ? fromRow(data) : { ...emptyPlan(), isNew: true };
 }
 
 export async function saveMyPlan(user, plan) {
   if (DEMO) {
-    try { localStorage.setItem("es-master-plan-v2", JSON.stringify(plan)); } catch { /* ignorera */ }
+    try { localStorage.setItem("es-master-plan-v3", JSON.stringify(plan)); } catch { /* ignorera */ }
     return;
   }
   const row = {
@@ -86,6 +86,61 @@ export async function loadClassmates(user) {
     .from("plans").select("*").eq("visible", true).neq("user_id", user.id).order("name");
   if (error) throw error;
   return data.map(fromRow).filter((p) => p.name);
+}
+
+// ---------- Kurspoolen (delad mellan alla) ----------
+
+const lsGet = (k, fallback) => { try { return JSON.parse(localStorage.getItem(k)) ?? fallback; } catch { return fallback; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* ignorera */ } };
+
+export async function loadPool() {
+  if (DEMO) return { courseRows: Object.values(lsGet("es-pool-courses", {})), folderRows: Object.values(lsGet("es-pool-folders", {})) };
+  const sb = await client();
+  const [c, f] = await Promise.all([sb.from("pool_courses").select("*"), sb.from("pool_folders").select("*")]);
+  if (c.error) throw c.error;
+  if (f.error) throw f.error;
+  return { courseRows: c.data, folderRows: f.data };
+}
+
+export async function savePoolCourse(id, data, by) {
+  const row = { id, data, updated_by: by, updated_at: new Date().toISOString() };
+  if (DEMO) { const all = lsGet("es-pool-courses", {}); all[id] = row; lsSet("es-pool-courses", all); return; }
+  const { error } = await (await client()).from("pool_courses").upsert(row);
+  if (error) throw error;
+}
+
+export async function deletePoolCourse(id) {
+  if (DEMO) { const all = lsGet("es-pool-courses", {}); delete all[id]; lsSet("es-pool-courses", all); return; }
+  const { error } = await (await client()).from("pool_courses").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function savePoolFolder(folder, by) {
+  const row = { id: folder.id, name: folder.name, description: folder.description || "", sort: folder.sort ?? 100, updated_by: by, updated_at: new Date().toISOString() };
+  if (DEMO) { const all = lsGet("es-pool-folders", {}); all[row.id] = row; lsSet("es-pool-folders", all); return; }
+  const { error } = await (await client()).from("pool_folders").upsert(row);
+  if (error) throw error;
+}
+
+export async function deletePoolFolder(id) {
+  if (DEMO) { const all = lsGet("es-pool-folders", {}); delete all[id]; lsSet("es-pool-folders", all); return; }
+  const { error } = await (await client()).from("pool_folders").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ---------- Betyg (privata, syns bara för en själv) ----------
+
+export async function loadGrades(user) {
+  if (DEMO) return lsGet("es-grades", {});
+  const { data, error } = await (await client()).from("grades").select("grades").eq("user_id", user.id).maybeSingle();
+  if (error) throw error;
+  return data?.grades || {};
+}
+
+export async function saveGrades(user, grades) {
+  if (DEMO) return lsSet("es-grades", grades);
+  const { error } = await (await client()).from("grades").upsert({ user_id: user.id, grades, updated_at: new Date().toISOString() });
+  if (error) throw error;
 }
 
 // ---------- Exempeldata för demoläget ----------

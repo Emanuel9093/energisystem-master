@@ -1,7 +1,8 @@
 // Kontrollerar en studieplan mot examenskraven för civilingenjörsexamen i energisystem.
 // Kraven kommer från utbildningsplanen (avsnitten "Preciserade krav").
 
-import { COURSES, BY_CODE, EXCLUSIVE_PAIRS } from "./courses.js";
+import { EXCLUSIVE_PAIRS } from "./courses.js";
+import { pool } from "./pool.js";
 
 export const STATUSES = {
   done: "Klar",
@@ -19,10 +20,11 @@ export function resolveCourses(plan, statuses) {
   const seen = new Set();
   for (const it of plan.items || []) {
     if (!statuses.includes(it.status)) continue;
-    if (it.code && BY_CODE[it.code]) {
+    const pc = it.code && pool.byId[it.code];
+    if (pc) {
       if (seen.has(it.code)) continue; // samma kurs inlagd två gånger räknas en gång
       seen.add(it.code);
-      list.push({ ...BY_CODE[it.code], status: it.status, inPlan: true });
+      list.push({ ...pc, code: pc.code || pc.id, status: it.status, inPlan: pc.inStudyPlan });
     } else if (it.custom) {
       const x = it.custom;
       list.push({
@@ -64,7 +66,7 @@ const sum = (arr) => arr.reduce((s, c) => s + c.hp, 0);
 
 export function evaluate(plan, statuses = ["done", "ongoing", "planned"]) {
   const { kept, conflicts } = dedupe(resolveCourses(plan, statuses));
-  const codes = new Set(kept.map((c) => c.code));
+  const codes = new Set(kept.map((c) => c.id || c.code));
 
   const total = sum(kept);
   const advanced = sum(kept.filter(isAdvanced));
@@ -77,18 +79,19 @@ export function evaluate(plan, statuses = ["done", "ongoing", "planned"]) {
   // Obligatoriska kurser (grupper med oneOf kräver en av kurserna)
   const missing = [];
   const groupsDone = new Set();
-  for (const c of COURSES.filter((x) => x.type === "obl")) {
+  const studyPlan = pool.courses.filter((x) => x.inStudyPlan);
+  for (const c of studyPlan.filter((x) => x.type === "obl")) {
     if (c.oneOf) {
       if (groupsDone.has(c.oneOf)) continue;
       groupsDone.add(c.oneOf);
-      const alts = COURSES.filter((x) => x.oneOf === c.oneOf);
+      const alts = studyPlan.filter((x) => x.oneOf === c.oneOf);
       if (!alts.some((a) => codes.has(a.code))) missing.push({ ...c, name: c.name.replace(" (SLU)", "") + " (UU eller SLU)" });
     } else if (!codes.has(c.code)) {
       missing.push(c);
     }
   }
 
-  const tsCourses = kept.filter((c) => c.type === "ts");
+  const tsCourses = kept.filter((c) => c.type === "ts" && c.inPlan);
   const tsCount = tsCourses.length;
   const tsUsedHp = sum(tsCourses.slice(0, 3));
 

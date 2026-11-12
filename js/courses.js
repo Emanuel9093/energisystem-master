@@ -123,6 +123,8 @@ export const EXCLUSIVE_PAIRS = [
   ["1TD342", "1TD393"], ["1TS309", "1GV134"], ["5LH654", "5LH242"], ["1TE700", "1TE754"],
   ["FÖ0498", "FÖ0477"], ["1KB274", "1KB765"], ["1TS356", "1TE792"], ["1EL016", "1FA529"],
   ["1TS359", "TN0351"], ["TE0018", "TE0005"], ["TE0018", "TE0008"], ["TE0018", "TE0016"],
+  // Kurspaketet i entreprenörskap kan inte kombineras med dessa
+  ["1TE674", "5LH654"], ["1TE674", "1TE687"], ["1TE674", "2JS905"], ["1TE674", "2FE030"],
 ];
 
 export const TERM_LABELS = {
@@ -152,3 +154,35 @@ export function offeringsOf(c) {
   for (const [t, periods] of c.extra || []) list.push({ year: yearOfTerm(t), periods });
   return list;
 }
+
+// Huvudområden enligt studieplanen.
+const T = "Teknik";
+export const AREAS = {
+  TN0367: [T], "1MA090": ["Matematik"], "1MA013": ["Matematik"], "1FA105": ["Fysik", T], "1MA016": ["Matematik"],
+  KE0049: ["Kemi"], "1TD433": ["Datavetenskap", T], BI1360: ["Biologi", "Geovetenskap"], "1FA102": ["Fysik", T],
+  MS0073: ["Matematik"], "1FA514": ["Fysik", T], "1FA527": ["Fysik", T], KE0079: ["Kemi"], "1EL016": [T],
+  "1MA024": ["Matematik"], "1EL004": ["Energiteknik", T], TN0373: [T], "1TD342": ["Datavetenskap", "Matematik", T],
+  "FÖ0498": ["Företagsekonomi"], "1TD352": ["Datavetenskap", T], TN0285: [T], "1MA034": ["Matematik"],
+  "1FA540": ["Fysik", T], KE0069: ["Kemi", "Biologi"], "1TE655": ["System i teknik och samhälle", T],
+  "1RT490": ["System i teknik och samhälle", T], "1TE078": ["Fysik"], "1TE061": ["Industriell teknik", T],
+  "1TE687": [], "2JS905": [], "1TE642": [T], "1FA522": ["Fysik"], "1TE654": [T], "1FA311": [T], EX0946: [T],
+  "1FA410": [T], "1TE029": ["Energiteknik", "Förnybar elproduktion", T], "1TE035": [T],
+  "1TE765": ["Elektroteknik", "Förnybar elproduktion", T], MX0162: ["Miljövetenskap"], "1TS359": [T], TE0018: [T],
+  "1TS309": [T], TN0352: [T], "1TE038": ["Förnybar elproduktion", T], "1TE043": ["Förnybar elproduktion", T],
+  "1GV334": [T], "1FA412": ["Fysik", T], "1TS356": [T], TN0365: [T], "1RT495": ["Inbyggda system", T],
+  "1FA591": ["Fysik", T], "1RT890": [T], "1TE028": ["Energiteknik", "Förnybar elproduktion", T], TN0347: [T],
+  "1TE700": ["Energiteknik", "Förnybar elproduktion", T], "1KB274": ["Energiteknik", "Förnybar elproduktion", T],
+  TN0350: [T], "1FA594": [T], "5LH654": ["Idéhistoria"], "1TE065": ["Förnybar elproduktion", T],
+  "1TE724": ["Förnybar elproduktion", T], "1FA392": [T], EX1032: [T],
+  "1TD354": ["Datavetenskap", T, "Tillämpad beräkningsvetenskap"], "1TE737": ["Förnybar elproduktion", T],
+  "1FA452": [T], "1RT700": ["Bildanalys och maskininlärning", "Dataanalys", "Datavetenskap", "Matematik", T],
+  "1EL009": ["Elektroteknik", T], "1TE649": [T], "1FA393": [T], "1FA394": [T], TE0024: [T], TE0023: [T],
+  "1FA456": ["Fysik", T],
+};
+
+export const KNOWN_AREAS = [
+  "Teknik", "Matematik", "Fysik", "Kemi", "Datavetenskap", "Energiteknik", "Förnybar elproduktion", "Elektroteknik",
+  "Biologi", "Geovetenskap", "Miljövetenskap", "Företagsekonomi", "Industriell teknik", "System i teknik och samhälle",
+  "Inbyggda system", "Tillämpad beräkningsvetenskap", "Dataanalys", "Bildanalys och maskininlärning", "Idéhistoria",
+  "Matematisk statistik", "Industriell ekonomi",
+];
