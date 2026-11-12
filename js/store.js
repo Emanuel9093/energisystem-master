@@ -5,9 +5,11 @@ import { BY_CODE, offeringsOf } from "./courses.js";
 
 export const DEMO = !SUPABASE_URL || !SUPABASE_ANON_KEY;
 
-// summers: år (1–4) som följs av en sommar med sommarkurser.
-// hide_done: avklarade kurser syns inte för andra ESare (pågående och planerade syns alltid).
-export const emptyPlan = () => ({ name: "", start_year: null, hide_done: false, rows: { 1: 3, 2: 3, 3: 3, 4: 3, 5: 3 }, summers: [], items: [] });
+// years: antal år i planen (5, eller fler för den som tar paus eller läser på deltid).
+// summers: år som följs av en sommar med sommarkurser.
+// hide_done: planerade och avklarade kurser syns inte för andra ESare (pågående syns alltid).
+export const MIN_YEARS = 5, MAX_YEARS = 8;
+export const emptyPlan = () => ({ name: "", start_year: null, hide_done: false, years: MIN_YEARS, rows: { 1: 3, 2: 3, 3: 3, 4: 3, 5: 3 }, summers: [], items: [] });
 
 const STATUS_OK = new Set(["planned", "ongoing", "done"]);
 const int = (v, lo, hi, d) => { const n = Number(v); return Number.isInteger(n) && n >= lo && n <= hi ? n : d; };
@@ -19,14 +21,14 @@ function cleanItem(it) {
   if (!it || typeof it !== "object") return null;
   const out = {
     id: txt(it.id, 40) || "i" + Math.random().toString(36).slice(2),
-    year: int(it.year, 1, 5, 1), period: int(it.period, 1, 4, 1), row: int(it.row, 0, 5, 0),
+    year: int(it.year, 1, MAX_YEARS, 1), period: int(it.period, 1, 4, 1), row: int(it.row, 0, 5, 0),
     span: int(it.span, 1, 4, 1), thick: !!it.thick,
     status: STATUS_OK.has(it.status) ? it.status : "planned",
   };
   if (out.period + out.span - 1 > 4) out.span = 5 - out.period;
   if (!out.thick && int(it.h, 2, 2, 0)) out.h = 2; // kurs som tar två rader (högre studietakt)
   // Sommarkurs: sommaren efter år `year`, en enda period, `row` är ordningen i listan.
-  if (it.summer) Object.assign(out, { summer: true, year: int(it.year, 1, 4, 1), period: 1, span: 1, thick: false, row: int(it.row, 0, 99, 0) });
+  if (it.summer) Object.assign(out, { summer: true, year: int(it.year, 1, MAX_YEARS - 1, 1), period: 1, span: 1, thick: false, row: int(it.row, 0, 99, 0) });
   if (out.summer) delete out.h;
   if (it.code) out.code = txt(it.code, 40);
   if (it.eligOk) out.eligOk = true; // "Jag är behörig ändå"
@@ -41,15 +43,17 @@ function cleanItem(it) {
 }
 
 const normalize = (p) => {
-  const rows = { ...emptyPlan().rows };
-  for (const y of [1, 2, 3, 4, 5]) rows[y] = int(p.rows?.[y], 1, 6, 3);
   const items = (Array.isArray(p.items) ? p.items : []).map(cleanItem).filter(Boolean);
-  const summers = new Set((Array.isArray(p.summers) ? p.summers : []).map((y) => int(y, 1, 4, 0)).filter(Boolean));
+  // Planen har minst så många år att alla kurser får plats
+  const years = Math.max(int(p.years, MIN_YEARS, MAX_YEARS, MIN_YEARS), ...items.map((it) => it.year + (it.summer ? 1 : 0)));
+  const rows = {};
+  for (let y = 1; y <= years; y++) rows[y] = int(p.rows?.[y], 1, 6, 3);
+  const summers = new Set((Array.isArray(p.summers) ? p.summers : []).map((y) => int(y, 1, years - 1, 0)).filter(Boolean));
   for (const it of items) if (it.summer) summers.add(it.year);
   return {
     ...emptyPlan(), ...p,
     name: txt(p.name, 80), start_year: int(p.start_year, 2010, 2040, null), hide_done: !!p.hide_done,
-    rows, summers: [...summers].sort(), items,
+    years, rows, summers: [...summers].sort((a, b) => a - b), items,
   };
 };
 
@@ -144,7 +148,7 @@ export async function signOut() {
 
 const fromRow = (r) => normalize({
   user_id: r.user_id, name: r.name, start_year: r.start_year, hide_done: r.hide_done,
-  rows: r.plan?.rows, summers: r.plan?.summers, items: r.plan?.items, updated_at: r.updated_at,
+  years: r.plan?.years, rows: r.plan?.rows, summers: r.plan?.summers, items: r.plan?.items, updated_at: r.updated_at,
 });
 
 export async function loadMyPlan(user) {
@@ -170,7 +174,7 @@ export async function saveMyPlan(user, plan) {
     name: plan.name.trim(),
     start_year: plan.start_year || null,
     hide_done: !!plan.hide_done,
-    plan: { rows: plan.rows, summers: plan.summers, items: plan.items },
+    plan: { years: plan.years, rows: plan.rows, summers: plan.summers, items: plan.items },
     updated_at: new Date().toISOString(),
   };
   const { error } = await (await client()).from("plans").upsert(row);
@@ -178,8 +182,8 @@ export async function saveMyPlan(user, plan) {
 }
 
 export async function loadClassmates(user) {
-  // Databasfunktionen tar själv bort avklarade kurser för den som valt att dölja dem.
-  if (DEMO) return DEMO_CLASSMATES.map((p) => (p.hide_done ? { ...p, items: p.items.filter((it) => it.status !== "done") } : p));
+  // Databasfunktionen tar själv bort allt utom pågående kurser för den som valt att dölja sin plan.
+  if (DEMO) return DEMO_CLASSMATES.map((p) => normalize(p.hide_done ? { ...p, items: p.items.filter((it) => it.status === "ongoing") } : p));
   const { data, error } = await (await client()).rpc("classmate_plans");
   if (error) throw error;
   return data.map(fromRow).filter((p) => p.name).sort((a, b) => a.name.localeCompare(b.name, "sv"));

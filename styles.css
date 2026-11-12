@@ -483,10 +483,18 @@ legend { font-size: 13px; font-weight: 700; color: var(--accent); padding: 0 4px
 .year-tabs .add-summer:hover { color: var(--accent); border-color: var(--es-teal); background: var(--accent-soft); }
 .year-tabs .add-summer svg { width: 14px; height: 14px; }
 .year-tabs .sum-short { display: none; }
+.year-tabs .add-year {
+  flex: 0 0 auto; padding: 0 10px; flex-direction: row; gap: 4px; align-items: center; justify-content: center;
+  border: 1px dashed var(--border); background: none; color: var(--muted);
+}
+.year-tabs .add-year span { font-weight: 700; font-size: 13px; }
+.year-tabs .add-year:hover { color: var(--accent); border-color: var(--es-teal); background: var(--accent-soft); }
+.year-tabs .add-year svg { width: 14px; height: 14px; }
 .year-tabs button small { white-space: nowrap; }
 @media (max-width: 520px) {
   .year-tabs { gap: 3px; } .year-tabs .add-summer { flex-basis: 18px; } .year-tabs button { padding: 8px 2px; } .year-tabs button small { font-size: 10.5px; }
   .year-tabs .sum-full { display: none; } .year-tabs .sum-short { display: inline; }
+  .year-tabs .add-year { padding: 0 4px; gap: 1px; } .year-tabs .add-year span { font-size: 11px; } .year-tabs .add-year svg { width: 11px; height: 11px; }
 }
 .summer-list { display: flex; flex-direction: column; gap: 12px; }
 .summer-list .pill { margin: 0; min-height: 44px; position: relative; }

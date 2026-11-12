@@ -23,7 +23,7 @@ alter table public.plans drop constraint if exists plans_size;
 alter table public.plans add constraint plans_size check (pg_column_size(plan) < 200000);
 
 -- Direkt läsning: bara den egna planen. Klasskompisarnas planer hämtas via
--- classmate_plans() nedan, som tar bort avklarade kurser för den som valt att dölja dem.
+-- classmate_plans() nedan. För den som valt att dölja sin plan skickas bara kurserna som pågår.
 drop policy if exists "Läs egen och synliga planer" on public.plans;
 drop policy if exists "Läs egen plan" on public.plans;
 create policy "Läs egen plan" on public.plans
@@ -39,7 +39,7 @@ set search_path = public
 as $$
   select p.user_id, p.name, p.start_year, p.hide_done,
     case when p.hide_done then jsonb_set(p.plan, '{items}', coalesce(
-      (select jsonb_agg(i) from jsonb_array_elements(coalesce(p.plan -> 'items', '[]'::jsonb)) i where i ->> 'status' is distinct from 'done'),
+      (select jsonb_agg(i) from jsonb_array_elements(coalesce(p.plan -> 'items', '[]'::jsonb)) i where i ->> 'status' = 'ongoing'),
       '[]'::jsonb))
     else p.plan end,
     p.updated_at

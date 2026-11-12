@@ -15,6 +15,7 @@ const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 const MAX_ROWS = 6;
+const { MIN_YEARS, MAX_YEARS } = store;
 const THICK_ROWS = 3;
 const GRADES = ["3", "4", "5", "G", "VG"];
 
@@ -89,6 +90,7 @@ async function afterLogin() {
     return showError(e);
   }
   if (state.summer && !state.plan.summers.includes(state.summer)) state.summer = null;
+  if (state.year > state.plan.years) state.year = state.plan.years;
   // Nya planer: år 1–3 fylls i med de obligatoriska kurserna som klara
   if (state.plan.isNew) {
     delete state.plan.isNew;
@@ -345,7 +347,7 @@ function renderPlan() {
           <label class="field">Startår
             <input id="p-year" type="number" min="2010" max="2040" value="${esc(state.plan.start_year ?? "")}" placeholder="t.ex. 2022">
           </label>
-          <label class="check" title="Pågående och planerade kurser syns alltid för andra ESare."><input id="p-hide-done" type="checkbox" ${state.plan.hide_done ? "checked" : ""}> Dölj mina avklarade kurser för andra ESare</label>
+          <label class="check" title="Kurserna du läser just nu syns alltid för andra ESare."><input id="p-hide-done" type="checkbox" ${state.plan.hide_done ? "checked" : ""}> Dölj min plan och avklarade kurser</label>
         </div>
 
         <nav class="year-tabs" aria-label="Välj år eller sommar">${yearTabs()}</nav>
@@ -363,10 +365,11 @@ function renderPlan() {
 function yearTabs() {
   const sel = state.summer;
   let html = "";
-  for (let n = 1; n <= 5; n++) {
+  const last = state.plan.years;
+  for (let n = 1; n <= last; n++) {
     const on = !sel && n === state.year;
     html += `<button data-year="${n}" class="${on ? "active" : ""}" aria-current="${on}"><span>År ${n}</span><small>${yearHp(n)} hp</small></button>`;
-    if (n === 5) break;
+    if (n === last) break;
     if (state.plan.summers.includes(n)) {
       const son = sel === n;
       html += `<button data-summer="${n}" class="sum-tab ${son ? "active" : ""}" aria-current="${son}" title="Sommaren mellan år ${n} och ${n + 1}"><span class="sum-full">Sommar</span><span class="sum-short" aria-hidden="true">☀</span><small>${summerHp(n)} hp</small></button>`;
@@ -374,6 +377,7 @@ function yearTabs() {
       html += `<button data-add-summer="${n}" class="add-summer" title="Lägg till sommar mellan år ${n} och ${n + 1}" aria-label="Lägg till sommar mellan år ${n} och ${n + 1}">${ICONS.plus}</button>`;
     }
   }
+  if (last < MAX_YEARS) html += `<button data-add-year class="add-year" title="Lägg till ett år (paus eller deltidsstudier)" aria-label="Lägg till år ${last + 1}">${ICONS.plus}<span>År</span></button>`;
   return html;
 }
 
@@ -450,6 +454,7 @@ function yearCard(y) {
       <button class="btn small ghost" id="fill-year">Fyll i obligatoriska kurser</button>
       ${items.length ? `<button class="btn small ghost" id="done-year">Markera året som klart</button>
       <button class="btn small ghost danger" id="clear-year">Töm året</button>` : ""}
+      ${y === state.plan.years && y > MIN_YEARS ? `<button class="btn small ghost danger" id="remove-year">Ta bort år ${y}</button>` : ""}
     </div>
     ${items.length ? "" : `<p class="muted small empty-hint">Klicka på en tom ruta för att välja kurs för den perioden.</p>`}`;
 }
@@ -476,6 +481,31 @@ function bindPlan() {
       const n = Number(ab.dataset.addSummer);
       state.plan.summers = [...new Set([...state.plan.summers, n])].sort();
       selectSummer(n);
+      changed();
+      return renderPlan();
+    }
+    if (t.closest("[data-add-year]")) {
+      const n = state.plan.years + 1;
+      if (n > MAX_YEARS) return;
+      state.plan.years = n;
+      state.plan.rows[n] = 3;
+      state.year = n;
+      selectSummer(null);
+      changed();
+      return renderPlan();
+    }
+    if (t.closest("#remove-year")) {
+      const n = state.plan.years;
+      if (n <= MIN_YEARS) return;
+      // Året och sommaren före det försvinner
+      const list = state.plan.items.filter((it) => it.year === n || (it.summer && it.year === n - 1));
+      if (list.length && !confirm(`Ta bort år ${n} och ${plural(list.length, "kurs", "kurser")} (${list.map(itemName).join(", ")})?`)) return;
+      state.plan.items = state.plan.items.filter((it) => !list.includes(it));
+      state.plan.summers = state.plan.summers.filter((x) => x < n - 1);
+      delete state.plan.rows[n];
+      state.plan.years = n - 1;
+      state.year = n - 1;
+      selectSummer(null);
       changed();
       return renderPlan();
     }
@@ -1559,7 +1589,7 @@ function renderGrades() {
   const maxDist = Math.max(1, ...Object.values(dist));
   const series = gpaSeries(rows);
 
-  const byYear = [1, 2, 3, 4, 5].map((y) => {
+  const byYear = Array.from({ length: state.plan.years }, (_, i) => i + 1).map((y) => {
     const list = rows.filter((it) => it.year === y);
     if (!list.length) return "";
     return `
@@ -1756,7 +1786,7 @@ function openPerson(i) {
   const myKeys = new Set(state.plan.items.map(itemKey));
   const total = m.items.reduce((s, it) => s + itemHp(it), 0);
   const blocks = [];
-  for (let y = 1; y <= 5; y++) {
+  for (let y = 1; y <= m.years; y++) {
     const list = m.items.filter((it) => it.year === y && !it.summer).sort((a, b) => a.period - b.period || a.row - b.row);
     blocks.push({ title: `År ${y}`, sub: m.start_year ? `${m.start_year + y - 1}/${String(m.start_year + y).slice(2)}` : "", list });
     const sum = m.items.filter((it) => it.year === y && it.summer);
@@ -1772,7 +1802,7 @@ function openPerson(i) {
     <div class="dlg-head">
       <div>
         <h2><span class="avatar big">${esc(initials(m.name))}</span> ${esc(m.name)}</h2>
-        <p class="muted small">${m.start_year ? `Började ${m.start_year} · ` : ""}${total} hp i planen${m.hide_done ? " · visar inte sina avklarade kurser" : ""}</p>
+        <p class="muted small">${m.start_year ? `Började ${m.start_year} · ` : ""}${total} hp i planen${m.hide_done ? " · visar bara kurserna som pågår" : ""}</p>
       </div>
       <button class="icon-btn" data-close aria-label="Stäng">✕</button>
     </div>

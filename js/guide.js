@@ -95,7 +95,7 @@ export function guideHTML() {
       <section class="card" id="g-integritet">
         <h2>Vad syns för andra?</h2>
         <ul class="tips">
-          <li><strong>Syns för andra ES-studenter:</strong> ditt namn, startår och vilka kurser du har i planen, med status. Dina pågående och planerade kurser syns alltid. Bocka i <em>Dölj mina avklarade kurser för andra ESare</em> om du inte vill visa vad du redan har läst.</li>
+          <li><strong>Syns för andra ES-studenter:</strong> ditt namn, startår och vilka kurser du har i planen, med status. Kurserna du läser just nu syns alltid. Bocka i <em>Dölj min plan och avklarade kurser</em> om du inte vill visa vad du har läst och planerar att läsa.</li>
           <li><strong>Syns aldrig för andra:</strong> dina betyg och din e-postadress.</li>
           <li><strong>Kurspoolen är gemensam.</strong> Det du ändrar där syns för alla, med ditt namn som senaste ändrare.</li>
         </ul>

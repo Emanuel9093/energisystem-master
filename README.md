@@ -46,7 +46,7 @@ Inloggning sker med valfri e-post och lösenord. Nya konton bekräftar sin adres
 
 I Supabase: **Authentication → Sign In / Providers → Email** ska vara på, med *Confirm email* påslaget. Sätt minsta lösenordslängd till 8 under **Authentication → Policies** (eller motsvarande). Lägg `http://localhost:5173/` och sidans riktiga adress under *Redirect URLs* så att bekräftelse- och återställningslänkarna fungerar.
 
-Varje student kan bara ändra sin egen plan. Andra ESares planer hämtas via databasfunktionen `classmate_plans()`. Den tar bort avklarade kurser för den som bockat i "Dölj mina avklarade kurser för andra ESare", så de lämnar aldrig databasen. Pågående och planerade kurser syns alltid.
+Varje student kan bara ändra sin egen plan. Andra ESares planer hämtas via databasfunktionen `classmate_plans()`. För den som bockat i "Dölj min plan och avklarade kurser" skickar den bara kurserna som pågår, så resten av planen lämnar aldrig databasen. Pågående kurser syns alltid.
 
 > Supabases inbyggda mejlutskick är begränsat till några få mejl i timmen. Om många ska logga in samtidigt: lägg in en egen SMTP-server under **Authentication → Emails → SMTP Settings**.
 
