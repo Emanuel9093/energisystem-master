@@ -13,6 +13,8 @@
 //   period  läsperiod(er) som text
 //   uni     "UU" eller "SLU"
 //   oneOf   kurser med samma oneOf-grupp: exakt en räknas (t.ex. examensarbete UU/SLU)
+//   thick   true för kurser som tar alla tre rader (självständigt arbete, examensarbete)
+//   extra   ytterligare tillfällen: [[termin, [perioder]]]
 //   techNat false för valbara kurser som varken är tekniska eller naturvetenskapliga
 
 const c = (code, name, hp, level, teknik, type, term, period, extra = {}) => ({
@@ -43,7 +45,7 @@ export const COURSES = [
   c("1TD342", "Introduktion till beräkningsvetenskap", 5, "G1F", true, "obl", 4, "4"),
 
   // Årskurs 3
-  c("FÖ0498", "Ekonomistyrning för ingenjörer", 5, "G1F", false, "obl", 5, "1 (ges även T7)"),
+  c("FÖ0498", "Ekonomistyrning för ingenjörer", 5, "G1F", false, "obl", 5, "1 (ges även T7)", { extra: [[7, [1]]] }),
   c("1TD352", "Beräkningsvetenskap för dataanalys", 5, "G2F", true, "obl", 5, "1"),
   c("TN0285", "Energi- och livscykelanalys", 5, "G2F", true, "obl", 5, "1"),
   c("1MA034", "Transformmetoder", 5, "G1F", false, "obl", 5, "2"),
@@ -57,9 +59,9 @@ export const COURSES = [
   c("2JS905", "Miljörätt", 5, "G1N", false, "val", 6, "3", { techNat: false }),
   c("1TE642", "Praktisk prototypframtagning", 5, "G1F", true, "val", 6, "3"),
   c("1FA522", "Vågor och optik", 5, "G2F", false, "val", 6, "3"),
-  c("1TE654", "Hållfasthetslära", 5, "G1F", true, "val", 6, "3 (ges även T7)"),
-  c("1FA311", "Självständigt arbete i energisystem", 15, "G2E", true, "obl", 6, "4", { oneOf: "sjalvstandigt" }),
-  c("EX0946", "Självständigt arbete i energisystem (SLU)", 15, "G2E", true, "obl", 6, "4", { oneOf: "sjalvstandigt" }),
+  c("1TE654", "Hållfasthetslära", 5, "G1F", true, "val", 6, "3 (ges även T7)", { extra: [[7, [1]]] }),
+  c("1FA311", "Självständigt arbete i energisystem", 15, "G2E", true, "obl", 6, "4", { oneOf: "sjalvstandigt", thick: true }),
+  c("EX0946", "Självständigt arbete i energisystem (SLU)", 15, "G2E", true, "obl", 6, "4", { oneOf: "sjalvstandigt", thick: true }),
 
   // Årskurs 4, termin 7
   c("1FA410", "Kärnkraft – teknik och system", 10, "A1N", true, "ts", 7, "1–2"),
@@ -79,7 +81,7 @@ export const COURSES = [
   c("1FA412", "Framtida nukleära energisystem – analyser och simuleringar", 5, "A1F", true, "val", 8, "3"),
   c("1TS356", "Urbana och decentraliserade energisystem", 5, "A1N", true, "val", 8, "3"),
   c("TN0365", "Logistik", 5, "A1N", true, "val", 8, "4"),
-  c("1RT495", "Reglerteknik II", 5, "A1N", true, "val", 8, "4 (även tillval P1)"),
+  c("1RT495", "Reglerteknik II", 5, "A1N", true, "val", 8, "4 (även tillval P1)", { extra: [["X", [1]]] }),
   c("1FA591", "Mätteknik för energisystem", 5, "A1N", true, "val", 8, "4"),
 
   // Årskurs 5, termin 9
@@ -95,8 +97,8 @@ export const COURSES = [
   c("1TE724", "Avancerad solcellsdesign", 5, "A1F", true, "val", 9, "2"),
 
   // Årskurs 5, termin 10
-  c("1FA392", "Examensarbete i energisystem", 30, "A2E", true, "obl", 10, "3–4", { oneOf: "examensarbete" }),
-  c("EX1032", "Examensarbete i energisystem (SLU)", 30, "A2E", true, "obl", 10, "3–4", { oneOf: "examensarbete" }),
+  c("1FA392", "Examensarbete i energisystem", 30, "A2E", true, "obl", 10, "3–4", { oneOf: "examensarbete", thick: true }),
+  c("EX1032", "Examensarbete i energisystem (SLU)", 30, "A2E", true, "obl", 10, "3–4", { oneOf: "examensarbete", thick: true }),
 
   // Tillvalskurser
   c("1TD354", "Beräkningsvetenskap för partiella differentialekvationer", 5, "A1N", true, "till", "X", "2"),
@@ -132,3 +134,21 @@ export const TERM_LABELS = {
 export const TERM_ORDER = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, "X", "S"];
 
 export const LEVELS = ["G1N", "G1F", "G2F", "G2E", "A1N", "A1F", "A2E"];
+
+// Vilka perioder (1–4 inom läsåret) kursen går över, t.ex. "1–2" → [1, 2]. null = valfri.
+export function periodsOf(c) {
+  const m = String(c.period).match(/^(\d)(?:–(\d))?/);
+  if (!m) return null;
+  const a = Number(m[1]), b = Number(m[2] || m[1]);
+  return Array.from({ length: b - a + 1 }, (_, i) => a + i);
+}
+
+// Årskurs (1–5) för en termin, null för tillval/sommar.
+export const yearOfTerm = (t) => (typeof t === "number" ? Math.ceil(t / 2) : null);
+
+// Alla tillfällen en kurs ges: [{ year, periods }]
+export function offeringsOf(c) {
+  const list = [{ year: yearOfTerm(c.term), periods: periodsOf(c) }];
+  for (const [t, periods] of c.extra || []) list.push({ year: yearOfTerm(t), periods });
+  return list;
+}

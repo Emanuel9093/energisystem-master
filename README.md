@@ -1,8 +1,10 @@
 # Energisystem – masterplanering
 
+Färger och logga kommer från [Föreningen Energisystem](https://www.essektionen.se/).
+
 En webbsida för oss på Civilingenjörsprogrammet i energisystem (TES2Y, UU/SLU):
 
-- **Min plan**: markera kurser som klara, pågående eller planerade och lägg till egna kurser (t.ex. utbytesstudier).
+- **Min plan**: ett år i taget, med fyra läsperioder och tre rader (normal studietakt). Klicka på en tom ruta för att välja kurs för den perioden. Kurser som går över två perioder blir långa, och självständigt arbete och examensarbete tar alla tre rader. Lägg till fler rader om du läser utökat. Klicka på en kurs för att markera den som planerad, pågående eller klar. Egna kurser (t.ex. utbytesstudier) kan läggas till i kursväljaren.
 - **Examenskrav**: sidan kontrollerar direkt om planen uppfyller kraven för civilingenjörsexamen:
   - 300 hp totalt och alla obligatoriska kurser
   - examensarbete 30 hp (A2E, teknik)

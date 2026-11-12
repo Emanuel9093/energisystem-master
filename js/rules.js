@@ -13,18 +13,23 @@ const isAdvanced = (c) => c.level.startsWith("A");
 const isThesis = (c) => c.level === "A2E";
 
 // Bygger listan av kurser som räknas, med katalogkurser och egna kurser.
+// plan.items: [{ id, year, period, row, span, code } eller { ..., custom: { name, code, hp, level, teknik } }]
 export function resolveCourses(plan, statuses) {
   const list = [];
-  for (const [code, status] of Object.entries(plan.courses || {})) {
-    if (!statuses.includes(status) || !BY_CODE[code]) continue;
-    list.push({ ...BY_CODE[code], status, inPlan: true });
-  }
-  for (const x of plan.custom || []) {
-    if (!statuses.includes(x.status)) continue;
-    list.push({
-      code: (x.code || "").toUpperCase(), name: x.name, hp: Number(x.hp) || 0, level: x.level,
-      teknik: !!x.teknik, type: "extern", status: x.status, inPlan: false, techNat: true, customId: x.id,
-    });
+  const seen = new Set();
+  for (const it of plan.items || []) {
+    if (!statuses.includes(it.status)) continue;
+    if (it.code && BY_CODE[it.code]) {
+      if (seen.has(it.code)) continue; // samma kurs inlagd två gånger räknas en gång
+      seen.add(it.code);
+      list.push({ ...BY_CODE[it.code], status: it.status, inPlan: true });
+    } else if (it.custom) {
+      const x = it.custom;
+      list.push({
+        code: (x.code || "").toUpperCase(), name: x.name, hp: Number(x.hp) || 0, level: x.level,
+        teknik: !!x.teknik, type: "extern", status: it.status, inPlan: false, techNat: true,
+      });
+    }
   }
   return list;
 }

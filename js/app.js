@@ -1,29 +1,45 @@
-import { COURSES, BY_CODE, TERM_LABELS, TERM_ORDER, LEVELS } from "./courses.js";
+import { COURSES, BY_CODE, TERM_LABELS, LEVELS, offeringsOf, yearOfTerm } from "./courses.js";
 import { evaluate, STATUSES } from "./rules.js";
 import { ALLOWED_EMAIL_DOMAINS } from "./config.js";
 import * as store from "./store.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const app = $("#app");
+const dlg = $("#dlg");
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
-const initials = (name) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0].toUpperCase()).join("");
+const initials = (name) => (name || "?").split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0].toUpperCase()).join("");
+const uid = () => "i" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+const MAX_ROWS = 6;
+const THICK_ROWS = 3;
+
+const ICONS = {
+  lock: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`,
+  clock: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`,
+  trash: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>`,
+  plus: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`,
+};
 
 const state = {
   user: null,
   plan: store.emptyPlan(),
   mates: [],
   view: "plan",
-  scope: "all", // "all" eller "done"
-  openTerms: new Set([7, 8, 9, 10]),
-  query: "",
+  year: Number(sessionGet("es-year")) || 1,
+  scope: "all",
+  picker: null,
+  pickerQuery: "",
   mateTerm: "advanced",
   mateMode: "course",
   mateQuery: "",
   saveState: "",
 };
 
-// ---------- Start ----------
+function sessionGet(k) { try { return sessionStorage.getItem(k); } catch { return null; } }
+function sessionSet(k, v) { try { sessionStorage.setItem(k, v); } catch { /* ignorera */ } }
+
+// ---------- Start och inloggning ----------
 
 async function start() {
   $("#demo-banner").hidden = !store.DEMO;
@@ -63,15 +79,14 @@ function showError(e) {
 function renderUser() {
   const el = $("#user");
   if (!state.user || store.DEMO) { el.innerHTML = ""; return; }
-  el.innerHTML = `<span class="muted">${esc(state.user.email)}</span> <button class="btn small" id="logout">Logga ut</button>`;
+  el.innerHTML = `<span class="muted hide-sm">${esc(state.user.email)}</span> <button class="btn small" id="logout">Logga ut</button>`;
   $("#logout").onclick = async () => { await store.signOut(); state.user = null; afterLogin(); };
 }
-
-// ---------- Inloggning ----------
 
 function renderLogin(message = "") {
   app.innerHTML = `
     <div class="card login">
+      <img src="assets/es-logo.png" alt="" class="login-logo">
       <h1>Logga in</h1>
       <p class="muted">Ange din studentadress så skickar vi en inloggningslänk. Du behöver inget lösenord.</p>
       <form id="login-form">
@@ -120,6 +135,51 @@ function updateSaveState() {
   if (el) el.textContent = state.saveState;
 }
 
+// ---------- Hjälpfunktioner för planen ----------
+
+const itemCourse = (it) => (it.code ? BY_CODE[it.code] : null);
+const itemName = (it) => itemCourse(it)?.name ?? it.custom?.name ?? "Okänd kurs";
+const itemHp = (it) => itemCourse(it)?.hp ?? (Number(it.custom?.hp) || 0);
+const rowsOf = (y) => state.plan.rows[y] ?? 3;
+const yearItems = (y) => state.plan.items.filter((it) => it.year === y);
+const yearHp = (y) => yearItems(y).reduce((s, it) => s + itemHp(it), 0);
+const thickRowsOf = (y) => Math.min(THICK_ROWS, rowsOf(y));
+
+function cellsOf(it) {
+  const rows = it.thick ? [...Array(thickRowsOf(it.year)).keys()] : [it.row];
+  const cells = [];
+  for (const r of rows) for (let p = it.period; p < it.period + it.span; p++) cells.push(`${r}:${p}`);
+  return cells;
+}
+
+function occupied(y, ignoreId) {
+  const map = new Map();
+  for (const it of yearItems(y)) if (it.id !== ignoreId) for (const c of cellsOf(it)) map.set(c, it);
+  return map;
+}
+
+// Returnerar ett felmeddelande eller null om kursen får plats.
+function placementError(y, period, row, span, thick) {
+  if (period + span - 1 > 4) return `Kursen går över ${span} perioder och får inte plats från period ${period}.`;
+  const occ = occupied(y);
+  const rows = thick ? [...Array(thickRowsOf(y)).keys()] : [row];
+  for (const r of rows) for (let p = period; p < period + span; p++) {
+    const other = occ.get(`${r}:${p}`);
+    if (other) return `Platsen är upptagen av ${itemName(other)} (period ${p}).`;
+  }
+  return null;
+}
+
+function placedWhere(code) {
+  return state.plan.items.find((it) => it.code === code);
+}
+
+function matesFor(code) {
+  return state.mates
+    .map((m) => ({ m, it: m.items.find((x) => x.code === code) }))
+    .filter((x) => x.it);
+}
+
 // ---------- Huvudrendering ----------
 
 function render() {
@@ -137,107 +197,29 @@ $("#tabs").addEventListener("click", (ev) => {
 
 // ---------- Min plan ----------
 
-function matesFor(code) {
-  return state.mates.filter((m) => m.courses[code]);
-}
-
-function statusSeg(code, current, attr = "data-code") {
-  const opts = [["", "–"], ["planned", "Planerad"], ["ongoing", "Läser"], ["done", "Klar"]];
-  return `<div class="seg" role="group" aria-label="Status">${opts
-    .map(([v, l]) => `<button type="button" ${attr}="${esc(code)}" data-status="${v}" class="${(current || "") === v ? "on" : ""}" aria-pressed="${(current || "") === v}">${l}</button>`)
-    .join("")}</div>`;
-}
-
-function courseRow(c) {
-  const status = state.plan.courses[c.code] || "";
-  const mates = c.type === "obl" ? [] : matesFor(c.code);
-  const tags = [
-    `<span>${esc(c.code)}${c.uni === "SLU" ? " · SLU" : ""}</span>`,
-    `<span>${c.hp} hp</span>`,
-    `<span class="tag ${c.level.startsWith("A") ? "adv" : ""}">${c.level}</span>`,
-    c.teknik ? `<span class="tag">Teknik</span>` : "",
-    c.type === "obl" ? `<span class="tag obl">Obligatorisk</span>` : "",
-    c.type === "ts" ? `<span class="tag ts">Teknik och system</span>` : "",
-    c.techNat === false ? `<span class="tag">Ej teknisk/naturvet.</span>` : "",
-    `<span>Period ${esc(c.period)}</span>`,
-    mates.length ? `<span class="tag mates" title="${esc(mates.map((m) => m.name).join(", "))}">${mates.length} klasskompis${mates.length > 1 ? "ar" : ""}</span>` : "",
-  ].join("");
-  return `
-    <div class="course">
-      <div>
-        <div class="course-name">${esc(c.name)}</div>
-        <div class="course-meta">${tags}</div>
-        ${c.note ? `<div class="course-meta">${esc(c.note)}</div>` : ""}
-      </div>
-      ${statusSeg(c.code, status)}
-    </div>`;
-}
-
 function renderPlan() {
-  const q = state.query.toLowerCase();
-  const terms = TERM_ORDER.map((t) => {
-    let list = COURSES.filter((c) => c.term === t);
-    if (q) list = list.filter((c) => c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q));
-    if (!list.length) return "";
-    const chosen = list.filter((c) => state.plan.courses[c.code]);
-    const hp = chosen.reduce((s, c) => s + c.hp, 0);
-    const open = q || state.openTerms.has(t);
-    const hasObl = list.some((c) => c.type === "obl");
-    return `
-      <details class="term" data-term="${t}" ${open ? "open" : ""}>
-        <summary><h3>${TERM_LABELS[t]}</h3><span class="term-meta">${chosen.length ? `${chosen.length} valda · ${hp} hp` : `${list.length} kurser`}</span></summary>
-        ${list.map(courseRow).join("")}
-        ${hasObl && typeof t === "number" && t <= 6 ? `<div class="term-actions"><button class="btn small" data-mark-term="${t}">Markera obligatoriska som klara</button></div>` : ""}
-      </details>`;
-  }).join("");
-
-  const customRows = state.plan.custom.map((x) => `
-    <div class="course">
-      <div>
-        <div class="course-name">${esc(x.name)}</div>
-        <div class="course-meta">
-          ${x.code ? `<span>${esc(x.code)}</span>` : ""}<span>${Number(x.hp) || 0} hp</span>
-          <span class="tag ${String(x.level).startsWith("A") ? "adv" : ""}">${esc(x.level)}</span>
-          ${x.teknik ? `<span class="tag">Teknik</span>` : ""}<span class="tag">Utanför studieplanen</span>
-          <button class="btn link small" data-remove-custom="${esc(x.id)}">Ta bort</button>
-        </div>
-      </div>
-      ${statusSeg(x.id, x.status, "data-custom")}
-    </div>`).join("");
-
+  const y = state.year;
   app.innerHTML = `
     <div class="plan-layout">
       <div class="stack">
-        <div>
-          <h1>Min plan</h1>
-          <p class="muted" style="margin:0">Markera kurser du har klarat, läser nu eller planerar att läsa. Kraven till höger uppdateras direkt.</p>
-        </div>
         <div class="card profile">
           <label class="field">Namn (syns för klasskompisar)
             <input id="p-name" value="${esc(state.plan.name)}" maxlength="80" placeholder="För- och efternamn">
           </label>
-          <label class="field">Startår på programmet
+          <label class="field">Startår
             <input id="p-year" type="number" min="2010" max="2040" value="${esc(state.plan.start_year ?? "")}" placeholder="t.ex. 2022">
           </label>
           <label class="check"><input id="p-visible" type="checkbox" ${state.plan.visible ? "checked" : ""}> Visa mina kurser för klasskompisar</label>
         </div>
-        <div class="toolbar">
-          <input type="search" id="q" placeholder="Sök kurs eller kurskod" value="${esc(state.query)}">
-          <button class="btn" id="mark-all">Markera åk 1–3 som klara</button>
-        </div>
-        <div>${terms || `<div class="card empty">Inga kurser matchar sökningen.</div>`}</div>
-        <details class="term" open>
-          <summary><h3>Egna kurser utanför studieplanen</h3><span class="term-meta">t.ex. utbyte eller fristående kurser</span></summary>
-          ${customRows}
-          <form class="custom-form" id="custom-form">
-            <label class="field">Kurskod<input name="code" placeholder="valfritt"></label>
-            <label class="field wide">Kursnamn<input name="name" required placeholder="Kursens namn"></label>
-            <label class="field">hp<input name="hp" type="number" min="0.5" step="0.5" required value="5"></label>
-            <label class="field">Nivå<select name="level">${LEVELS.map((l) => `<option ${l === "A1N" ? "selected" : ""}>${l}</option>`).join("")}</select></label>
-            <label class="check"><input type="checkbox" name="teknik" checked> Teknik</label>
-            <button class="btn" type="submit">Lägg till</button>
-          </form>
-        </details>
+
+        <nav class="year-tabs" aria-label="Välj år">
+          ${[1, 2, 3, 4, 5].map((n) => `
+            <button data-year="${n}" class="${n === y ? "active" : ""}" aria-current="${n === y}">
+              <span>År ${n}</span><small>${yearHp(n)} hp</small>
+            </button>`).join("")}
+        </nav>
+
+        <section class="card year-card" id="year-card">${yearCard(y)}</section>
       </div>
       <aside class="sidebar card" id="reqs"></aside>
     </div>`;
@@ -245,6 +227,345 @@ function renderPlan() {
   renderReqs();
   bindPlan();
 }
+
+function yearCard(y) {
+  const rows = rowsOf(y);
+  const items = yearItems(y);
+  const occ = occupied(y);
+  const ht = 2 * y - 1, vt = 2 * y;
+
+  let cells = "";
+  for (let r = 0; r < rows; r++) {
+    for (let p = 1; p <= 4; p++) {
+      const taken = occ.has(`${r}:${p}`);
+      cells += taken
+        ? `<div class="slot taken" style="grid-row:${r + 1};grid-column:${p}"></div>`
+        : `<button class="slot" style="grid-row:${r + 1};grid-column:${p}" data-slot="${r}:${p}" aria-label="Lägg till kurs i period ${p}, rad ${r + 1}">${ICONS.plus}</button>`;
+    }
+    const lockedByThick = items.some((it) => it.thick) && r < THICK_ROWS && rows <= THICK_ROWS;
+    cells += `<button class="row-del" style="grid-row:${r + 1};grid-column:5" data-del-row="${r}" ${rows <= 1 || lockedByThick ? "disabled" : ""} title="Ta bort rad" aria-label="Ta bort rad ${r + 1}">${ICONS.trash}</button>`;
+  }
+
+  const pills = items.map((it) => {
+    const c = itemCourse(it);
+    const rowSpan = it.thick ? thickRowsOf(y) : 1;
+    const icon = it.status === "done" ? ICONS.lock : it.status === "ongoing" ? ICONS.clock : "";
+    const name = itemName(it);
+    return `
+      <button class="pill ${it.status} ${it.thick ? "thick" : ""}" data-item="${esc(it.id)}"
+        style="grid-row:${(it.thick ? 0 : it.row) + 1} / span ${rowSpan};grid-column:${it.period} / span ${it.span}"
+        title="${esc(name)} – ${STATUSES[it.status]}">
+        ${icon}<span class="pill-name">${esc(name)}</span><span class="hp">${itemHp(it)} hp</span>
+        ${!c ? `<span class="sr-only">(egen kurs)</span>` : ""}
+      </button>`;
+  }).join("");
+
+  return `
+    <header class="year-head">
+      <h2>År ${y}</h2>
+      <span class="year-hp">${yearHp(y)} hp</span>
+    </header>
+    <div class="grid-scroll">
+      <div class="ygrid-wrap">
+        <div class="terms">
+          <span style="grid-column:1 / span 2">HT · termin ${ht}</span>
+          <span style="grid-column:3 / span 2">VT · termin ${vt}</span>
+        </div>
+        <div class="periods">${[1, 2, 3, 4].map((p) => `<span>Period ${p}</span>`).join("")}</div>
+        <div class="ygrid" style="grid-template-rows:repeat(${rows}, var(--row-h))">${cells}${pills}</div>
+      </div>
+    </div>
+    <div class="year-actions">
+      <button class="btn small" id="add-row" ${rows >= MAX_ROWS ? "disabled" : ""}>${ICONS.plus} Lägg till rad (utökad studietakt)</button>
+      <span class="spacer"></span>
+      <button class="btn small ghost" id="fill-year">Fyll i obligatoriska kurser</button>
+      ${items.length ? `<button class="btn small ghost" id="done-year">Markera året som klart</button>
+      <button class="btn small ghost danger" id="clear-year">Töm året</button>` : ""}
+    </div>
+    ${items.length ? "" : `<p class="muted small empty-hint">Klicka på en tom ruta för att välja kurs för den perioden.</p>`}`;
+}
+
+function bindPlan() {
+  $("#p-name").oninput = (e) => { state.plan.name = e.target.value; changed(); };
+  $("#p-year").oninput = (e) => { state.plan.start_year = e.target.value ? Number(e.target.value) : null; changed(); };
+  $("#p-visible").onchange = (e) => { state.plan.visible = e.target.checked; changed(); };
+
+  app.onclick = (ev) => {
+    const t = ev.target;
+    const yb = t.closest("[data-year]");
+    if (yb) { state.year = Number(yb.dataset.year); sessionSet("es-year", state.year); return renderPlan(); }
+
+    const slot = t.closest("[data-slot]");
+    if (slot) {
+      const [row, period] = slot.dataset.slot.split(":").map(Number);
+      return openPicker({ year: state.year, period, row });
+    }
+    const pill = t.closest("[data-item]");
+    if (pill) return openItem(pill.dataset.item);
+
+    const del = t.closest("[data-del-row]");
+    if (del && !del.disabled) return deleteRow(state.year, Number(del.dataset.delRow));
+
+    if (t.closest("#add-row")) {
+      state.plan.rows[state.year] = Math.min(MAX_ROWS, rowsOf(state.year) + 1);
+      changed();
+      return renderPlan();
+    }
+    if (t.closest("#fill-year")) { fillMandatory(state.year); return; }
+    if (t.closest("#done-year")) {
+      yearItems(state.year).forEach((it) => (it.status = "done"));
+      changed();
+      return renderPlan();
+    }
+    if (t.closest("#clear-year")) {
+      if (!confirm(`Ta bort alla kurser i år ${state.year}?`)) return;
+      state.plan.items = state.plan.items.filter((it) => it.year !== state.year);
+      state.plan.rows[state.year] = 3;
+      changed();
+      return renderPlan();
+    }
+  };
+}
+
+function deleteRow(y, r) {
+  const victims = yearItems(y).filter((it) => !it.thick && it.row === r);
+  if (victims.length && !confirm(`Raden innehåller ${victims.map(itemName).join(", ")}. Ta bort raden och kurserna?`)) return;
+  state.plan.items = state.plan.items.filter((it) => !victims.includes(it));
+  for (const it of yearItems(y)) if (!it.thick && it.row > r) it.row--;
+  state.plan.rows[y] = rowsOf(y) - 1;
+  changed();
+  renderPlan();
+}
+
+function addItem(y, period, row, fields) {
+  const it = { id: uid(), year: y, period, row: fields.thick ? 0 : row, status: "planned", ...fields };
+  state.plan.items.push(it);
+  changed();
+  return it;
+}
+
+// Lägger in årets obligatoriska kurser på första lediga plats.
+function fillMandatory(y) {
+  const groupsTaken = new Set(state.plan.items.map((it) => BY_CODE[it.code]?.oneOf).filter(Boolean));
+  const list = [];
+  for (const c of COURSES) {
+    if (c.type !== "obl" || yearOfTerm(c.term) !== y || placedWhere(c.code)) continue;
+    if (c.oneOf) {
+      if (groupsTaken.has(c.oneOf)) continue;
+      groupsTaken.add(c.oneOf);
+    }
+    const off = offeringsOf(c).find((o) => o.year === y);
+    list.push({ c, period: off.periods[0], span: off.periods.length });
+  }
+  list.sort((a, b) => (b.c.thick ? 1 : 0) - (a.c.thick ? 1 : 0) || a.period - b.period || b.span - a.span);
+
+  const skipped = [];
+  for (const { c, period, span } of list) {
+    if (c.thick) {
+      if (placementError(y, period, 0, span, true)) skipped.push(c.name);
+      else addItem(y, period, 0, { code: c.code, span, thick: true });
+      continue;
+    }
+    let row = [...Array(rowsOf(y)).keys()].find((r) => !placementError(y, period, r, span, false));
+    if (row === undefined) {
+      if (rowsOf(y) >= MAX_ROWS) { skipped.push(c.name); continue; }
+      state.plan.rows[y] = rowsOf(y) + 1;
+      row = rowsOf(y) - 1;
+    }
+    addItem(y, period, row, { code: c.code, span, thick: false });
+  }
+  renderPlan();
+  if (skipped.length) alert(`Fick inte plats med: ${skipped.join(", ")}. Flytta eller ta bort kurser och försök igen.`);
+}
+
+// ---------- Kursväljare ----------
+
+function openPicker(ctx) {
+  state.picker = ctx;
+  state.pickerQuery = "";
+  renderPicker();
+  if (!dlg.open) dlg.showModal();
+  $("#pick-q")?.focus();
+}
+
+function pickEntry(c, offering, ctx) {
+  const placed = placedWhere(c.code);
+  const groupTaken = c.oneOf && state.plan.items.find((it) => BY_CODE[it.code]?.oneOf === c.oneOf);
+  const span = offering?.periods?.length ?? 1;
+  const err = placed ? `Redan inlagd i år ${placed.year}` : groupTaken ? `Du har redan ${itemName(groupTaken)}` : placementError(ctx.year, ctx.period, ctx.row, span, !!c.thick);
+  const mates = matesFor(c.code).length;
+  const where = offering?.periods
+    ? `${offering.year ? `År ${offering.year}` : "Tillval"}, period ${offering.periods.join("–")}`
+    : c.term === "S" ? "Sommar" : "Valfri period";
+  return `
+    <button class="pick" data-pick="${esc(c.code)}" data-span="${span}" ${err ? "disabled" : ""}>
+      <span class="pick-main">
+        <span class="pick-name">${esc(c.name)}</span>
+        <span class="course-meta">
+          <span>${esc(c.code)}${c.uni === "SLU" ? " · SLU" : ""}</span><span>${c.hp} hp</span>
+          <span class="tag ${c.level.startsWith("A") ? "adv" : ""}">${c.level}</span>
+          ${c.type === "obl" ? `<span class="tag obl">Obligatorisk</span>` : ""}
+          ${c.type === "ts" ? `<span class="tag ts">Teknik och system</span>` : ""}
+          <span>${where}</span>
+          ${c.thick ? `<span class="tag">Tar alla tre rader</span>` : ""}
+          ${mates ? `<span class="tag mates">${mates} klasskompis${mates > 1 ? "ar" : ""}</span>` : ""}
+        </span>
+        ${err ? `<span class="pick-err">${esc(err)}</span>` : ""}
+      </span>
+    </button>`;
+}
+
+function renderPicker() {
+  const ctx = state.picker;
+  const q = state.pickerQuery.trim().toLowerCase();
+  let sections;
+
+  if (q) {
+    const hits = COURSES.filter((c) => c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q));
+    sections = [["Sökresultat", hits.map((c) => {
+      const offs = offeringsOf(c);
+      return [c, offs.find((o) => o.year === ctx.year && o.periods?.[0] === ctx.period) || offs[0]];
+    })]];
+  } else {
+    const thisYear = [], other = [], free = [];
+    for (const c of COURSES) {
+      for (const o of offeringsOf(c)) {
+        if (!o.periods) { free.push([c, o]); break; }
+        if (o.periods[0] !== ctx.period) continue;
+        (o.year === ctx.year ? thisYear : other).push([c, o]);
+        break;
+      }
+    }
+    sections = [
+      [`Studieplanen år ${ctx.year}, period ${ctx.period}`, thisYear],
+      [`Andra kurser som börjar i period ${ctx.period}`, other],
+      ["Valfri period och sommar", free],
+    ];
+  }
+
+  const body = sections
+    .filter(([, list]) => list.length)
+    .map(([title, list]) => `<h3 class="pick-h">${esc(title)}</h3>${list.map(([c, o]) => pickEntry(c, o, ctx)).join("")}`)
+    .join("") || `<p class="muted">Inga kurser matchar.</p>`;
+
+  dlg.innerHTML = `
+    <div class="dlg-head">
+      <div>
+        <h2>Välj kurs</h2>
+        <p class="muted small">År ${ctx.year} · period ${ctx.period} · rad ${ctx.row + 1}</p>
+      </div>
+      <button class="icon-btn" data-close aria-label="Stäng">✕</button>
+    </div>
+    <input type="search" id="pick-q" placeholder="Sök bland alla kurser" value="${esc(state.pickerQuery)}">
+    <div class="pick-list">${body}</div>
+    <details class="custom-box">
+      <summary>Lägg till egen kurs (utbyte, fristående kurs …)</summary>
+      <form id="custom-form" class="custom-form">
+        <label class="field wide">Kursnamn<input name="name" required></label>
+        <label class="field">Kurskod<input name="code" placeholder="valfritt"></label>
+        <label class="field">hp<input name="hp" type="number" min="0.5" step="0.5" required value="5"></label>
+        <label class="field">Nivå<select name="level">${LEVELS.map((l) => `<option ${l === "A1N" ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+        <label class="field">Perioder<select name="span">${[1, 2, 3, 4].map((n) => `<option value="${n}">${n}</option>`).join("")}</select></label>
+        <label class="check"><input type="checkbox" name="teknik" checked> Huvudområde teknik</label>
+        <label class="check"><input type="checkbox" name="thick"> Tjock (tar tre rader)</label>
+        <p class="pick-err" id="custom-err"></p>
+        <button class="btn primary" type="submit">Lägg till</button>
+      </form>
+    </details>`;
+
+  const qi = $("#pick-q");
+  qi.oninput = () => {
+    state.pickerQuery = qi.value;
+    const pos = qi.selectionStart;
+    renderPicker();
+    const n = $("#pick-q");
+    n.focus();
+    n.setSelectionRange(pos, pos);
+  };
+
+  $("#custom-form").onsubmit = (ev) => {
+    ev.preventDefault();
+    const f = new FormData(ev.target);
+    const span = Number(f.get("span"));
+    const thick = f.get("thick") === "on";
+    const err = placementError(ctx.year, ctx.period, ctx.row, span, thick);
+    if (err) { $("#custom-err").textContent = err; return; }
+    addItem(ctx.year, ctx.period, ctx.row, {
+      span, thick,
+      custom: { name: f.get("name").trim(), code: f.get("code").trim(), hp: Number(f.get("hp")), level: f.get("level"), teknik: f.get("teknik") === "on" },
+    });
+    dlg.close();
+    renderPlan();
+  };
+}
+
+dlg.addEventListener("click", (ev) => {
+  if (ev.target === dlg || ev.target.closest("[data-close]")) return dlg.close();
+  const pick = ev.target.closest("[data-pick]");
+  if (pick && !pick.disabled && state.picker) {
+    const c = BY_CODE[pick.dataset.pick];
+    const { year, period, row } = state.picker;
+    addItem(year, period, row, { code: c.code, span: Number(pick.dataset.span), thick: !!c.thick });
+    dlg.close();
+    renderPlan();
+    return;
+  }
+  const st = ev.target.closest("[data-set-status]");
+  if (st) {
+    const it = state.plan.items.find((x) => x.id === st.dataset.id);
+    it.status = st.dataset.setStatus;
+    changed();
+    renderPlan();
+    return openItem(it.id);
+  }
+  const rm = ev.target.closest("[data-remove]");
+  if (rm) {
+    state.plan.items = state.plan.items.filter((x) => x.id !== rm.dataset.remove);
+    changed();
+    dlg.close();
+    renderPlan();
+  }
+});
+dlg.addEventListener("close", () => { state.picker = null; });
+
+// ---------- Kursdetaljer ----------
+
+function openItem(id) {
+  const it = state.plan.items.find((x) => x.id === id);
+  if (!it) return;
+  state.picker = null;
+  const c = itemCourse(it);
+  const x = it.custom || {};
+  const mates = c ? matesFor(c.code) : [];
+  const periods = Array.from({ length: it.span }, (_, i) => it.period + i).join("–");
+  dlg.innerHTML = `
+    <div class="dlg-head">
+      <div>
+        <h2>${esc(itemName(it))}</h2>
+        <p class="muted small">År ${it.year} · period ${periods}${it.thick ? " · tar alla tre rader" : ""}</p>
+      </div>
+      <button class="icon-btn" data-close aria-label="Stäng">✕</button>
+    </div>
+    <div class="course-meta">
+      ${c ? `<span>${esc(c.code)}${c.uni === "SLU" ? " · SLU" : ""}</span><span>${c.hp} hp</span><span class="tag ${c.level.startsWith("A") ? "adv" : ""}">${c.level}</span>
+        ${c.teknik ? `<span class="tag">Teknik</span>` : ""}${c.type === "obl" ? `<span class="tag obl">Obligatorisk</span>` : ""}${c.type === "ts" ? `<span class="tag ts">Teknik och system</span>` : ""}`
+      : `${x.code ? `<span>${esc(x.code)}</span>` : ""}<span>${Number(x.hp) || 0} hp</span><span class="tag">${esc(x.level)}</span>${x.teknik ? `<span class="tag">Teknik</span>` : ""}<span class="tag">Utanför studieplanen</span>`}
+    </div>
+    ${c?.note ? `<p class="small muted">${esc(c.note)}</p>` : ""}
+    <h3 class="pick-h">Status</h3>
+    <div class="seg" role="group" aria-label="Status">
+      ${Object.entries(STATUSES).reverse().map(([k, l]) => `<button data-set-status="${k}" data-id="${esc(it.id)}" data-status="${k}" class="${it.status === k ? "on" : ""}" aria-pressed="${it.status === k}">${l}</button>`).join("")}
+    </div>
+    ${c ? `<h3 class="pick-h">Klasskompisar som läser kursen</h3>
+      ${mates.length ? `<div class="people">${mates.map(({ m, it: mi }) => personChip(m, mi.status)).join("")}</div>` : `<p class="muted small">Ingen ännu.</p>`}` : ""}
+    <div class="dlg-foot">
+      <button class="btn danger" data-remove="${esc(it.id)}">Ta bort från planen</button>
+      <button class="btn" data-close>Klar</button>
+    </div>`;
+  if (!dlg.open) dlg.showModal();
+}
+
+// ---------- Examenskrav ----------
 
 function renderReqs() {
   const all = evaluate(state.plan, ["done", "ongoing", "planned"]);
@@ -282,109 +603,11 @@ function renderReqs() {
       </div>
     </div>
     ${rows}
-    <div class="legend"><span><i style="background:var(--ok)"></i>Klart</span><span><i style="background:var(--planned);opacity:.35"></i>Läser/planerat</span></div>
+    <div class="legend"><span><i style="background:var(--ok)"></i>Klart</span><span><i style="background:var(--accent);opacity:.35"></i>Läser/planerat</span></div>
     ${shown.warnings.length ? `<div class="warnings">${shown.warnings.map((w) => `<div>${esc(w)}</div>`).join("")}</div>` : ""}
     <p class="save-state" id="save-state">${esc(state.saveState)}</p>`;
 
-  $("#reqs").querySelectorAll("[data-scope]").forEach((b) => (b.onclick = () => { state.scope = b.dataset.scope; renderReqs(); }));
-}
-
-function bindPlan() {
-  $("#p-name").oninput = (e) => { state.plan.name = e.target.value; changed(); };
-  $("#p-year").oninput = (e) => { state.plan.start_year = e.target.value ? Number(e.target.value) : null; changed(); };
-  $("#p-visible").onchange = (e) => { state.plan.visible = e.target.checked; changed(); };
-
-  const q = $("#q");
-  q.oninput = () => {
-    state.query = q.value;
-    const pos = q.selectionStart;
-    renderPlan();
-    const nq = $("#q");
-    nq.focus();
-    nq.setSelectionRange(pos, pos);
-  };
-
-  app.querySelectorAll("details.term[data-term]").forEach((d) => {
-    d.addEventListener("toggle", () => {
-      if (state.query) return;
-      const t = isNaN(d.dataset.term) ? d.dataset.term : Number(d.dataset.term);
-      d.open ? state.openTerms.add(t) : state.openTerms.delete(t);
-    });
-  });
-
-  app.onclick = (ev) => {
-    const seg = ev.target.closest("button[data-code]");
-    if (seg) {
-      const { code, status } = seg.dataset;
-      setCourseStatus(code, status);
-      return refreshPlanKeepScroll();
-    }
-    const cseg = ev.target.closest("button[data-custom]");
-    if (cseg) {
-      const item = state.plan.custom.find((x) => x.id === cseg.dataset.custom);
-      if (cseg.dataset.status) item.status = cseg.dataset.status;
-      else state.plan.custom = state.plan.custom.filter((x) => x !== item);
-      changed();
-      return refreshPlanKeepScroll();
-    }
-    const rm = ev.target.closest("[data-remove-custom]");
-    if (rm) {
-      state.plan.custom = state.plan.custom.filter((x) => x.id !== rm.dataset.removeCustom);
-      changed();
-      return refreshPlanKeepScroll();
-    }
-    const markTerm = ev.target.closest("[data-mark-term]");
-    if (markTerm) {
-      markMandatoryDone([Number(markTerm.dataset.markTerm)]);
-      return refreshPlanKeepScroll();
-    }
-    if (ev.target.id === "mark-all") {
-      markMandatoryDone([1, 2, 3, 4, 5, 6]);
-      return refreshPlanKeepScroll();
-    }
-  };
-
-  $("#custom-form").onsubmit = (ev) => {
-    ev.preventDefault();
-    const f = new FormData(ev.target);
-    state.plan.custom.push({
-      id: "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-      code: f.get("code").trim(), name: f.get("name").trim(), hp: Number(f.get("hp")),
-      level: f.get("level"), teknik: f.get("teknik") === "on", status: "planned",
-    });
-    changed();
-    refreshPlanKeepScroll();
-  };
-}
-
-function setCourseStatus(code, status) {
-  if (status) {
-    // Bara en kurs i en "en av"-grupp (t.ex. examensarbete UU/SLU)
-    const c = BY_CODE[code];
-    if (c?.oneOf) COURSES.filter((x) => x.oneOf === c.oneOf && x.code !== code).forEach((x) => delete state.plan.courses[x.code]);
-    state.plan.courses[code] = status;
-  } else {
-    delete state.plan.courses[code];
-  }
-  changed();
-}
-
-function markMandatoryDone(terms) {
-  for (const c of COURSES.filter((x) => x.type === "obl" && terms.includes(x.term))) {
-    if (c.oneOf && COURSES.some((x) => x.oneOf === c.oneOf && state.plan.courses[x.code])) {
-      const chosen = COURSES.find((x) => x.oneOf === c.oneOf && state.plan.courses[x.code]);
-      state.plan.courses[chosen.code] = "done";
-      continue;
-    }
-    state.plan.courses[c.code] = "done";
-  }
-  changed();
-}
-
-function refreshPlanKeepScroll() {
-  const y = window.scrollY;
-  renderPlan();
-  window.scrollTo(0, y);
+  $("#reqs").querySelectorAll("[data-scope]").forEach((b) => (b.onclick = (ev) => { ev.stopPropagation(); state.scope = b.dataset.scope; renderReqs(); }));
 }
 
 // ---------- Klasskompisar ----------
@@ -396,32 +619,32 @@ const MATE_FILTERS = [
 
 function personChip(m, status, me = false) {
   return `<span class="person ${me ? "me" : ""}" title="${esc(STATUSES[status] || "")}">
-    <span class="avatar">${esc(initials(m.name))}</span>${esc(me ? "Du" : m.name)}<span class="dot ${status}"></span></span>`;
+    <span class="avatar">${esc(me ? "Du" : initials(m.name))}</span>${esc(me ? "Du" : m.name)}<span class="dot ${status}"></span></span>`;
 }
 
 function renderMates() {
-  const me = { name: state.plan.name || "Du", courses: state.plan.courses, custom: state.plan.custom };
+  const me = { name: state.plan.name || "Du", items: state.plan.items };
   const everyone = [...state.mates.map((m) => ({ m, me: false })), { m: me, me: true }];
   const f = state.mateTerm;
   const q = state.mateQuery.toLowerCase();
 
-  // Per kurs
   const items = [];
   if (f !== "custom") {
     const terms = f === "advanced" ? [7, 8, 9, 10, "X", "S"] : [f];
     for (const c of COURSES.filter((x) => terms.includes(x.term) && (x.type !== "obl" || x.term >= 7))) {
-      const takers = everyone.filter(({ m }) => m.courses[c.code]);
-      if (!takers.length || !takers.some((t) => !t.me)) continue;
-      items.push({ name: c.name, meta: `${c.code} · ${c.hp} hp · ${c.level} · ${TERM_LABELS[c.term]}, period ${c.period}`, takers: takers.map((t) => ({ ...t, status: t.m.courses[c.code] })) });
+      const takers = everyone.map((e) => ({ ...e, it: e.m.items.find((x) => x.code === c.code) })).filter((e) => e.it);
+      if (!takers.some((t) => !t.me)) continue;
+      items.push({ name: c.name, meta: `${c.code} · ${c.hp} hp · ${c.level} · ${TERM_LABELS[c.term]}, period ${c.period}`, takers: takers.map((t) => ({ ...t, status: t.it.status })) });
     }
   }
   if (f === "custom" || f === "advanced") {
     const map = new Map();
     for (const { m, me: isMe } of everyone) {
-      for (const x of m.custom || []) {
+      for (const it of m.items.filter((x) => x.custom)) {
+        const x = it.custom;
         const key = (x.code || x.name).trim().toLowerCase();
         if (!map.has(key)) map.set(key, { name: x.name, meta: `${x.code ? x.code + " · " : ""}${x.hp} hp · ${x.level} · utanför studieplanen`, takers: [] });
-        map.get(key).takers.push({ m, me: isMe, status: x.status });
+        map.get(key).takers.push({ m, me: isMe, status: it.status });
       }
     }
     for (const v of map.values()) if (v.takers.some((t) => !t.me)) items.push(v);
@@ -438,19 +661,16 @@ function renderMates() {
         </div>`).join("")}</div>`
     : `<div class="card empty">${state.mates.length ? "Inga klasskompisar har valt kurser här ännu." : "Inga klasskompisar har lagt in sina kurser ännu. Dela länken till sidan!"}</div>`;
 
-  // Per person
   const people = state.mates
     .filter((m) => !q || m.name.toLowerCase().includes(q))
     .map((m) => {
-      const list = [
-        ...Object.entries(m.courses).map(([code, status]) => ({ c: BY_CODE[code], status })).filter((x) => x.c && x.c.type !== "obl")
-          .sort((a, b) => TERM_ORDER.indexOf(a.c.term) - TERM_ORDER.indexOf(b.c.term))
-          .map((x) => ({ name: x.c.name, meta: x.c.term === "X" || x.c.term === "S" ? "Tillval" : `T${x.c.term}`, status: x.status })),
-        ...(m.custom || []).map((x) => ({ name: x.name, meta: "Egen", status: x.status })),
-      ];
+      const list = m.items
+        .filter((it) => it.custom || (BY_CODE[it.code] && BY_CODE[it.code].type !== "obl"))
+        .sort((a, b) => a.year - b.year || a.period - b.period)
+        .map((it) => ({ name: itemNameOf(it), meta: `År ${it.year} · P${it.period}${it.span > 1 ? "–" + (it.period + it.span - 1) : ""}`, status: it.status }));
       return `
         <div class="card person-card">
-          <h3><span class="person" style="padding:0;background:none"><span class="avatar">${esc(initials(m.name))}</span></span>${esc(m.name)}</h3>
+          <h3><span class="avatar">${esc(initials(m.name))}</span>${esc(m.name)}</h3>
           <div class="muted small">${m.start_year ? `Började ${m.start_year}` : ""}</div>
           ${list.length ? `<ul>${list.map((x) => `<li><span class="dot ${x.status}" title="${STATUSES[x.status]}"></span>${esc(x.name)}<span class="muted">${esc(x.meta)}</span></li>`).join("")}</ul>` : `<p class="muted small">Inga valbara kurser inlagda.</p>`}
         </div>`;
@@ -489,6 +709,10 @@ function renderMates() {
     n.focus();
     n.setSelectionRange(pos, pos);
   };
+}
+
+function itemNameOf(it) {
+  return it.code ? BY_CODE[it.code]?.name ?? it.code : it.custom?.name ?? "";
 }
 
 start();
