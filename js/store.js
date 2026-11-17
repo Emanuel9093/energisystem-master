@@ -101,6 +101,8 @@ function authError(error) {
   if (/invalid login credentials/i.test(m)) return new Error("Fel e-post eller lösenord.");
   if (/email not confirmed/i.test(m)) return new Error("Du behöver bekräfta din e-post först. Klicka på länken i mejlet vi skickade.");
   if (/already registered|already exists/i.test(m)) return new Error("Det finns redan ett konto med den e-posten. Logga in eller återställ lösenordet.");
+  // Supabase skickar bara ett fåtal mejl per timme (bekräftelse, nytt lösenord) med sin inbyggda e-post
+  if (/email rate limit/i.test(m)) return new Error("Sidan har skickat för många mejl den senaste timmen. Försök igen om en timme, eller kontakta den som driver sidan.");
   if (/rate limit|too many/i.test(m)) return new Error("För många försök. Vänta en stund och försök igen.");
   if (/password should be|weak password|at least/i.test(m)) return new Error("Lösenordet är för svagt. Använd minst 8 tecken.");
   if (/same password|different from the old/i.test(m)) return new Error("Det nya lösenordet måste skilja sig från det gamla.");
