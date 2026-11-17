@@ -4,6 +4,11 @@
 // Kraven ligger på kursen i kurspoolen (c.req) och kan ändras där. Startvärden: reqs.js.
 
 import { pool, courseById, HP_KEYS } from "./pool.js";
+import { PROGRAM_LIST } from "./programs.js";
+
+// Kurser som är samma kurs med olika kod (t.ex. TN0362 och TN0373) eller som bara en av
+// får räknas in i examen. De ger samma behörighet.
+const twins = (code) => PROGRAM_LIST.flatMap((p) => p.pairs).filter((pair) => pair.includes(code)).flat();
 
 
 // Huvudområden som inte räknas som teknik/naturvetenskap
@@ -32,6 +37,9 @@ function facts(it) {
     if (c.oneOf) for (const id of groupMembers(c.oneOf)) codes.add(id);
   } else if (it.code) codes.add(it.code);
   else if (it.custom?.code) codes.add(String(it.custom.code).trim().toUpperCase());
+  // Kurskoden som står på kursen (kan ha ändrats i Kurspoolen) och samma kurs med annan kod
+  if (c?.code) codes.add(c.code.toUpperCase());
+  for (const code of [...codes]) for (const t of twins(code)) codes.add(t);
   return { hp, areas, adv: level.startsWith("A"), tn: areas.some((a) => !NOT_TN.has(a)) || (!c && !!x.teknik), codes };
 }
 

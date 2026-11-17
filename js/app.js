@@ -1654,7 +1654,7 @@ function openCourseEditor(c) {
       </div>
       <div class="form-grid">
         <label class="field wide">Kursnamn<input name="name" required maxlength="120" value="${esc(cur.name)}"></label>
-        <label class="field">Kurskod<input name="code" maxlength="20" value="${esc(cur.code)}" ${!isNew && c.inStudyPlan ? "readonly" : ""}></label>
+        <label class="field">Kurskod<input name="code" maxlength="20" value="${esc(cur.code)}"${!isNew && c.code !== c.id ? ` title="Ursprunglig kod: ${esc(c.id)}"` : ""}></label>
         <label class="field">hp<input name="hp" type="number" min="0.5" step="0.5" required value="${esc(cur.hp)}"></label>
         <label class="field">Nivå<select name="level">${[...LEVELS, "GXX"].map((l) => `<option ${l === cur.level ? "selected" : ""}>${l}</option>`).join("")}</select></label>
         <label class="field">Rekommenderat år<select name="year"><option value="">Inget</option>${[1, 2, 3, 4, 5].map((y) => `<option ${y === cur.year ? "selected" : ""}>${y}</option>`).join("")}</select></label>
