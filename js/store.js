@@ -34,6 +34,7 @@ function cleanItem(it) {
   if (out.summer) delete out.h;
   if (it.code) out.code = txt(it.code, 40);
   if (it.eligOk) out.eligOk = true; // "Jag är behörig ändå"
+  if (it.profileAs === "aff" || it.profileAs === "dig") out.profileAs = it.profileAs; // räknas till en profilering (I)
   if (it.custom && typeof it.custom === "object") {
     const c = it.custom;
     out.custom = { name: txt(c.name, 160) || "Namnlös kurs", code: txt(c.code, 20), hp: Math.max(0, Math.min(60, Number(c.hp) || 0)), level: txt(c.level, 4), teknik: !!c.teknik };

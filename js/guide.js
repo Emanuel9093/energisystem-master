@@ -119,9 +119,9 @@ export function guideHTML(prog) {
         <h2>Kom igång</h2>
         <ol class="steps">
           <li><strong>Skapa ett konto</strong> med din skolmail (@${SCHOOL_DOMAIN}) och ett lösenord, och bekräfta adressen via mejlet du får. Kommer du inte åt skolmailen kan du välja <em>Jag har inte tillgång till min skolmail</em> och begära ett konto med en annan adress. Bocka i <em>Kom ihåg mig</em> så slipper du logga in varje gång. Har du glömt lösenordet kan du återställa det via mejlen.</li>
-          <li><strong>Välj program.</strong> Programmet styr examenskraven, vilka kurser som rekommenderas och vilka studenter du ser. Du kan byta under Min plan.</li>
+          <li><strong>Välj program och när du började.</strong> Programmet styr examenskraven, vilka kurser som rekommenderas och vilka studenter du ser. De obligatoriska kurserna ändras lite varje år, och varje årskurs följer studieplanen som gällde det läsåret. Började du 2023 följer år 1 planen från 2023, år 2 planen från 2024 och så vidare. Sidan fyller i alla obligatoriska kurser. De före perioden du läser nu kan markeras som klara. Program och startår kan ändras under Min plan.</li>
           <li><strong>Skriv ditt namn</strong> högst upp under Min plan, så att andra ${who} ser vem du är.</li>
-          <li><strong>Kolla år 1–3.</strong> De obligatoriska kurserna är redan ifyllda och markerade som klara. Har du tillgodoräknat något annat
+          <li><strong>Kolla dina år.</strong> De obligatoriska kurserna är redan ifyllda. Har du tillgodoräknat något annat
           klickar du på kursen och väljer <em>Ta bort från planen</em> och lägger in det du har läst i stället.</li>
           <li><strong>Planera år 4–5.</strong> Klicka på en tom ruta för att välja kurs. Du ser bara kurser som ges i den perioden. En kurs som går
           period 1–2 hamnar alltid i period 1–2, även om du klickar i period 2.</li>
@@ -168,7 +168,8 @@ export function guideHTML(prog) {
         ${es ? `<details><summary>Ska jag välja examensarbete vid UU eller SLU?</summary>
           <p>Det beror på var ditt exjobb examineras. Båda räknas, men bara en av dem får ingå. Väljer du den andra varianten i kursväljaren byts den du redan har ut.</p></details>` : ""}
         ${prog.id === "I" ? `<details><summary>Hur väljer jag profileringskurser?</summary>
-          <p>Profileringskurserna har en etikett med profileringens namn i kursväljaren och i Kurspoolen. Du behöver minst 20 hp i den ena profileringen och minst 10 hp i den andra, och sedan 10 hp till som passar profilerna. Panelen Examenskrav visar hur långt du har kommit.</p></details>` : ""}
+          <p>Profileringskurserna har en etikett med profileringens namn i kursväljaren och i Kurspoolen. Du behöver minst 20 hp i den ena profileringen och minst 10 hp i den andra, och sedan 10 hp till som passar profilerna. Panelen Examenskrav visar hur långt du har kommit.</p>
+          <p>Har programansvarig godkänt att en kurs utanför studieplanen räknas till en profilering kan du klicka på kursen i din plan och välja profileringen under <em>Räkna kursen till en profilering</em>. Sidan är bara ett hjälpmedel, så kontrollera alltid med programansvarig först.</p></details>` : ""}
         <details><summary>Kan jag lägga en kurs i en period där den inte ges?</summary>
           <p>Kursväljaren visar de kurser som ges i perioden du klickade på, och de hamnar alltid i rätt perioder. Läser du en kurs på egen hand och tentar den i en annan period eller på sommaren kan du söka efter den, klicka på den och välja <em>Lägg till ändå</em>. Den får då ett varningstecken i planen. Har kursen bytt perioder kan du rätta det i Kurspoolen under <em>Ändra</em>.</p></details>
         ${es ? `<details><summary>Vad är kurspaketet i teknikbaserat entreprenörskap?</summary>

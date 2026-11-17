@@ -125,7 +125,7 @@ export const BY_CODE = Object.fromEntries(COURSES.map((x) => [x.code, x]));
 export const EXCLUSIVE_PAIRS = [
   ["1TD327", "1TD433"], ["1EL004", "1TE637"], ["1TD354", "1TD397"], ["1TD352", "1TD395"],
   ["1TD342", "1TD393"], ["1TS309", "1GV134"], ["5LH654", "5LH242"], ["1TE700", "1TE754"],
-  ["FÖ0498", "FÖ0477"], ["1KB274", "1KB765"], ["1TS356", "1TE792"],
+  ["FÖ0498", "FÖ0477"], ["1KB274", "1KB765"], ["KE0079", "KE0068"], ["TN0373", "TN0362"], ["1TS356", "1TE792"],
   ["1TS359", "TN0351"], ["TE0018", "TE0005"], ["TE0018", "TE0008"], ["TE0018", "TE0016"],
   // Kurspaketet i entreprenörskap kan inte kombineras med dessa
   ["1TE674", "5LH654"], ["1TE674", "1TE687"], ["1TE674", "2JS905"], ["1TE674", "2FE030"],

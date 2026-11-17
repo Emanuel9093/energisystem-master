@@ -23,17 +23,19 @@ export function resolveCourses(plan, statuses) {
   const seen = new Set();
   for (const it of plan.items || []) {
     if (!statuses.includes(it.status)) continue;
+    // Kurs utanför studieplanen som räknas till en profilering (godkänd av programansvarig)
+    const asProfile = P().id === "I" ? it.profileAs : undefined;
     const pc = it.code && pool.byId[it.code];
     if (pc) {
       if (seen.has(it.code)) continue; // samma kurs inlagd två gånger räknas en gång
       seen.add(it.code);
-      list.push({ ...pc, code: pc.code || pc.id, status: it.status, inPlan: pc.inStudyPlan });
+      list.push({ ...pc, code: pc.code || pc.id, status: it.status, inPlan: pc.inStudyPlan || !!asProfile, profile: (!pc.inStudyPlan && asProfile) || pc.profile });
     } else if (it.custom || it.snap) {
       // Privat kurs, eller en kurs som tagits bort ur kurspoolen (räknas som kurs utanför studieplanen)
       const x = it.custom || it.snap;
       list.push({
         code: String(x.code || it.code || "").toUpperCase(), name: x.name, hp: Number(x.hp) || 0, level: String(x.level || "G1N"),
-        teknik: !!x.teknik, type: "extern", status: it.status, inPlan: false, techNat: true,
+        teknik: !!x.teknik, type: "extern", status: it.status, inPlan: !!asProfile, techNat: true, profile: asProfile,
       });
     }
   }
@@ -84,17 +86,20 @@ export function evaluate(plan, statuses = ["done", "ongoing", "planned"]) {
   const missing = [];
   const groupsDone = new Set();
   const studyPlan = pool.courses.filter((x) => x.inStudyPlan);
+  // En kurs och dess ersättare (kurspar där bara en får räknas) uppfyller samma krav,
+  // t.ex. Organisk kemi KE0068 (äldre plan) och KE0079 (ny plan).
+  const has = (id) => codes.has(id) || P().pairs.some(([a, b]) => (a === id && codes.has(b)) || (b === id && codes.has(a)));
   for (const c of studyPlan.filter((x) => x.type === "obl")) {
     if (c.oneOf) {
       if (groupsDone.has(c.oneOf)) continue;
       groupsDone.add(c.oneOf);
       const alts = studyPlan.filter((x) => x.oneOf === c.oneOf);
-      if (!alts.some((a) => codes.has(a.id))) {
+      if (!alts.some((a) => has(a.id))) {
         const uuSlu = alts.every((a) => a.name.replace(" (SLU)", "") === c.name.replace(" (SLU)", ""));
         const name = uuSlu ? c.name.replace(" (SLU)", "") + " (UU eller SLU)" : `${c.name} (eller ${alts.filter((a) => a !== c).map((a) => a.name).join(", ")})`;
         missing.push({ ...c, name });
       }
-    } else if (!codes.has(c.id)) {
+    } else if (!has(c.id)) {
       missing.push(c);
     }
   }

@@ -29,7 +29,9 @@ Ett nytt program läggs till med en egen kursfil, en rad i `PROGRAMS` och dess k
 - **Mina betyg**: fyll i betyg (3/4/5/G/VG) för kurser som är klara. Viktat snitt räknas ut automatiskt och visas som en kurva termin för termin. Betygen sparas privat och visas aldrig för andra.
 - **Förfrågningar** (bara administratörer): godkänn studenter som inte kommer åt skolmailen.
 
-År 1–3 fylls i automatiskt med programmets obligatoriska kurser (markerade som klara) när någon väljer program. De går att ta bort om man har tillgodoräknat något annat.
+När någon skapar sin plan väljer hen program, startår och vilken period hen läser nu. De obligatoriska kurserna ändras lite varje år, och varje årskurs följer studieplanen som gällde det läsåret: den som började 2023 läser år 1 enligt 2023 års plan, år 2 enligt 2024 års plan och så vidare. Sidan pusslar ihop en plan för årskullen och fyller i alla obligatoriska kurser: före nuvarande period som klara (om man vill), i perioden som pågående och resten som planerade. De äldre studieplanerna (2023–2025) finns i `js/versions.js`. Startåret går att ändra under Min plan, och då räknas kraven om.
+
+På industriell ekonomi kan en kurs utanför studieplanen räknas till en profilering om programansvarig har godkänt det. Man väljer det när man klickar på kursen och får först bekräfta att det är kontrollerat. De går att ta bort om man har tillgodoräknat något annat.
 
 Kraven och kurserna kommer från [utbildningsplanen](https://www.uu.se/utbildning/utbildningsplan?query=8e0ca779-e57a-11f0-af1e-4773ce254d84) och [studieplanen](https://www.uu.se/utbildning/studieplan?query=10067), giltiga från HT 2026. Studieplanens kurser finns i `js/courses.js`, behörigheterna i `js/course-info.js`, mapparna och kurserna utanför studieplanen i `js/folders.js` och reglerna i `js/rules.js`. Sidan är ett hjälpmedel. Det är Examensenheten som avgör om du får ut examen.
 

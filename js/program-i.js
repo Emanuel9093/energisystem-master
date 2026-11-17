@@ -103,6 +103,7 @@ export const I_AREAS = {
 // Kurspar där endast en får räknas in i examen (från studieplanen).
 export const I_PAIRS = [
   ["1MA350", "1MA025"], ["1TD342", "1TD393"], ["1EL007", "1TS319"], ["1TS363", "1TE779"], ["1TS360", "1TE776"],
+  ["1TS364", "1TS351"], // samma kurs med ny kod
 ];
 
 export const PROFILES = { aff: "Affärsutveckling och innovation", dig: "Industriell analys och digitalisering" };

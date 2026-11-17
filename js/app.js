@@ -1,7 +1,8 @@
 import { LEVELS, KNOWN_AREAS } from "./courses.js";
 import { evaluate, STATUSES } from "./rules.js";
 import { pool, buildPool, courseById, coursesIn, inFolder, courseData, offeringText, safeUrl, HP_KEYS, cleanReq } from "./pool.js";
-import { P, setProgram, PROGRAMS, PROGRAM_LIST } from "./programs.js";
+import { P, setProgram, PROGRAMS, PROGRAM_LIST, planYears } from "./programs.js";
+import { FIRST_VERSION, LATEST_VERSION } from "./versions.js";
 import { PROFILES } from "./program-i.js";
 import * as store from "./store.js";
 import { guideHTML } from "./guide.js";
@@ -67,7 +68,7 @@ const whoN = (n) => `${n} ${n === 1 ? one() : who()}`;
 
 // Byter färger, logga och texter efter programmet.
 function applyProgram(id) {
-  const prog = setProgram(id);
+  const prog = setProgram(id, state.plan.start_year);
   document.documentElement.dataset.program = prog.id;
   try { localStorage.setItem("es-program", prog.id); } catch { /* ignorera */ }
   $("#brand-icon").src = prog.icon;
@@ -88,18 +89,30 @@ function filterMates() {
   state.mates = P().id === "none" ? state.allMates : state.allMates.filter((m) => m.program === P().id);
 }
 
-// Byter program och bygger om kurspoolen. fresh: nytt konto, fyll i år 1–3.
-function chooseProgram(id, fresh) {
+// Byter program och bygger om kurspoolen. fresh: nytt konto. setup: { start, now: { y, p }, markDone }
+// från steget där man väljer startår; då fylls alla obligatoriska kurser i enligt studieplanerna
+// för startåret. Kurser före perioden man läser nu blir klara (om man vill), kurser i perioden
+// pågående och senare kurser planerade.
+function chooseProgram(id, fresh, setup = null) {
   state.plan.program = id;
+  if (setup) state.plan.start_year = setup.start;
   applyProgram(id);
   filterMates();
   buildPool(state.poolRows.courseRows, state.poolRows.folderRows);
   state.poolFolder = "programplanen";
   if (fresh) {
     delete state.plan.isNew;
-    if (id !== "none") for (const y of [1, 2, 3]) fillMandatory(y, "done", true);
+    if (setup) {
+      const now = setup.now.y * 10 + setup.now.p;
+      const status = (y, period, span) => {
+        if (y * 10 + period + span - 1 < now) return setup.markDone ? "done" : "planned";
+        if (y * 10 + period <= now) return "ongoing";
+        return "planned";
+      };
+      for (let y = 1; y <= 5; y++) fillMandatory(y, status, true);
+    }
     state.view = "plan";
-    state.year = id === "none" ? 1 : 4;
+    state.year = setup ? Math.min(5, Math.max(1, setup.now.y)) : 1;
     state.summer = null;
   }
   changed();
@@ -107,12 +120,88 @@ function chooseProgram(id, fresh) {
   render();
 }
 
+// Var i utbildningen man är just nu, räknat från startåret och dagens datum.
+// Läsperioder ungefär: P1 aug–okt, P2 nov–mitten av jan, P3 jan–mars, P4 april–juli.
+function studyPosition(start) {
+  const d = new Date();
+  const m = d.getMonth() + 1;
+  const ay = m >= 7 ? d.getFullYear() : d.getFullYear() - 1;
+  const p = m >= 7 && m <= 10 ? 1 : m >= 11 || (m === 1 && d.getDate() < 20) ? 2 : m <= 3 ? 3 : 4;
+  const y = ay - start + 1;
+  if (y < 1) return { y: 1, p: 0 };
+  if (y > 5) return { y: 5, p: 4 };
+  return { y, p };
+}
+const academicYearNow = () => { const d = new Date(); return d.getMonth() + 1 >= 7 ? d.getFullYear() : d.getFullYear() - 1; };
+
+// Text om vilken studieplan varje årskurs följer: "år 1 följer planen från HT 2023, år 2 från HT 2024 …"
+function versionsText(start) {
+  const v = planYears(start);
+  const groups = [];
+  v.forEach((ver, i) => {
+    const g = groups[groups.length - 1];
+    if (g && g.ver === ver) g.to = i + 1; else groups.push({ ver, from: i + 1, to: i + 1 });
+  });
+  const part = (g, i) => `${i === 0 ? "År" : "år"} ${g.from}${g.to > g.from ? "–" + g.to : ""}${i === 0 ? " följer studieplanen" : ""} från HT ${g.ver}`;
+  const parts = groups.map(part);
+  const text = parts.length > 1 ? parts.slice(0, -1).join(", ") + " och " + parts[parts.length - 1] : parts[0];
+  return text + "." + (start < FIRST_VERSION ? ` Sidan har inte studieplanerna från före ${FIRST_VERSION}, så de första åren följer ${FIRST_VERSION} års plan. Kontrollera att rätt kurser blir ifyllda.` : "");
+}
+
+const SEM = (p) => (p <= 2 ? "HT" : "VT");
+
+// Steg 2 för ett nytt konto: startår, var man är nu och om tidigare kurser ska bli klara.
+function renderSetup(id) {
+  const prog = PROGRAMS[id];
+  const ayNow = academicYearNow();
+  const years = [];
+  for (let y = Math.max(ayNow, LATEST_VERSION); y >= 2018; y--) years.push(y);
+  let start = Math.min(ayNow, Math.max(...years));
+  let nowTouched = false;
+  const nowOptions = (pos) => `
+    <option value="1:0" ${pos.p === 0 ? "selected" : ""}>Jag har inte börjat än</option>
+    ${[1, 2, 3, 4, 5].map((y) => [1, 2, 3, 4].map((p) => `<option value="${y}:${p}" ${pos.y === y && pos.p === p ? "selected" : ""}>År ${y}, period ${p} (${SEM(p)})</option>`).join("")).join("")}`;
+  app.innerHTML = `
+    <div class="card choose">
+      <div class="setup-head"><img src="${esc(prog.logo)}" alt=""><div><h1>Din studiegång</h1><p class="muted" style="margin:0">${esc(prog.full)}</p></div></div>
+      <p>De obligatoriska kurserna ändras lite varje år, och varje årskurs följer studieplanen som gällde det läsåret. Välj när du började så fyller vi i rätt kurser för din årskull.</p>
+      <form id="setup-form" class="setup-form">
+        <label class="field">Vilket år började du på programmet?
+          <select name="start">${years.map((y) => `<option ${y === start ? "selected" : ""}>${y}</option>`).join("")}</select>
+        </label>
+        <p class="muted small" id="setup-versions">${esc(versionsText(start))}</p>
+        <label class="field">Vilken period läser du nu?
+          <select name="now">${nowOptions(studyPosition(start))}</select>
+        </label>
+        <label class="check"><input type="checkbox" name="done" checked> Markera obligatoriska kurser före den här perioden som klara</label>
+        <p class="muted small" style="margin:0">Kurser i perioden du läser nu blir <em>Läser nu</em> och senare kurser blir <em>Planerad</em>. Har du tagit uppehåll eller läst i en annan takt kan du flytta och ändra kurserna efteråt.</p>
+        <div class="dlg-foot">
+          <button type="button" class="btn" id="setup-back">Byt program</button>
+          <button type="submit" class="btn primary">Skapa min plan</button>
+        </div>
+      </form>
+    </div>`;
+  const form = $("#setup-form");
+  form.start.onchange = () => {
+    start = Number(form.start.value);
+    $("#setup-versions").textContent = versionsText(start);
+    if (!nowTouched) form.now.innerHTML = nowOptions(studyPosition(start));
+  };
+  form.now.onchange = () => { nowTouched = true; };
+  app.onclick = (ev) => { if (ev.target.closest("#setup-back")) renderChooseProgram(); };
+  form.onsubmit = (ev) => {
+    ev.preventDefault();
+    const [y, p] = form.now.value.split(":").map(Number);
+    chooseProgram(id, true, { start: Number(form.start.value), now: { y, p }, markDone: form.done.checked });
+  };
+}
+
 function renderChooseProgram() {
   $("#tabs").hidden = true;
   app.innerHTML = `
     <div class="card choose">
       <h1>Vilket program går du?</h1>
-      <p class="muted">Programmet styr examenskraven och vilka kurser som rekommenderas. År 1–3 fylls i med programmets obligatoriska kurser, markerade som klara. Du kan byta program senare under Min plan.</p>
+      <p class="muted">Programmet styr examenskraven och vilka kurser som rekommenderas. I nästa steg väljer du när du började, så fyller vi i de obligatoriska kurserna. Du kan byta program senare under Min plan.</p>
       <div class="prog-cards">
         ${PROGRAM_LIST.map((p) => `
           <button class="prog-card" data-choose="${esc(p.id)}">
@@ -129,7 +218,9 @@ function renderChooseProgram() {
     </div>`;
   app.onclick = (ev) => {
     const b = ev.target.closest("[data-choose]");
-    if (b) chooseProgram(b.dataset.choose, true);
+    if (!b) return;
+    if (b.dataset.choose === "none") chooseProgram("none", true);
+    else renderSetup(b.dataset.choose);
   };
 }
 
@@ -568,6 +659,12 @@ function bindPlan() {
     state.plan.start_year = Number.isInteger(y) && y >= 2010 && y <= 2040 ? y : null;
     changed();
   };
+  // Startåret avgör vilka studieplaner som gäller, så kurspoolen och kraven räknas om.
+  $("#p-year").onchange = () => {
+    setProgram(P().id, state.plan.start_year);
+    buildPool(state.poolRows.courseRows, state.poolRows.folderRows);
+    renderPlan();
+  };
   $("#p-hide-done").onchange = (e) => { state.plan.hide_done = e.target.checked; changed(); };
   $("#p-program").onchange = (e) => {
     const to = PROGRAMS[e.target.value];
@@ -686,17 +783,20 @@ function addItem(y, period, row, fields, status = "planned") {
 }
 
 // Lägger in årets obligatoriska kurser (enligt studieplanen) på första lediga plats.
+// status: "done"/"planned"/… eller en funktion (år, period, antal perioder) → status
 function fillMandatory(y, status, silent = false) {
+  const st = (period, span) => (typeof status === "function" ? status(y, period, span) : status);
   const groupsTaken = new Set(state.plan.items.map((it) => courseById(it.code)?.oneOf).filter(Boolean));
   const list = [];
   for (const c of pool.courses) {
-    if (!c.inStudyPlan || c.type !== "obl" || c.year !== y || placedWhere(c.id) || !c.offerings.length) continue;
+    if (!c.inStudyPlan || c.type !== "obl" || c.year !== y || placedWhere(c.id) || !(c.oblPeriods?.length || c.offerings.length)) continue;
     if (c.oneOf) {
       if (groupsTaken.has(c.oneOf)) continue;
       groupsTaken.add(c.oneOf);
     }
-    const off = c.offerings[0];
-    list.push({ c, period: off.periods[0], span: off.periods.length });
+    // Perioderna enligt studentens studieplan, annars kursens första tillfälle
+    const periods = c.oblPeriods?.length ? c.oblPeriods : c.offerings[0].periods;
+    list.push({ c, period: periods[0], span: periods.length });
   }
   list.sort((a, b) => (b.c.thick ? 1 : 0) - (a.c.thick ? 1 : 0) || a.period - b.period || b.span - a.span);
 
@@ -704,7 +804,7 @@ function fillMandatory(y, status, silent = false) {
   for (const { c, period, span } of list) {
     if (c.thick) {
       if (placementError(y, period, 0, span, true)) skipped.push(c.name);
-      else addItem(y, period, 0, { code: c.id, span, thick: true, snap: snapOf(c) }, status);
+      else addItem(y, period, 0, { code: c.id, span, thick: true, snap: snapOf(c) }, st(period, span));
       continue;
     }
     let row = [...Array(rowsOf(y)).keys()].find((r) => !placementError(y, period, r, span, false));
@@ -713,7 +813,7 @@ function fillMandatory(y, status, silent = false) {
       state.plan.rows[y] = rowsOf(y) + 1;
       row = rowsOf(y) - 1;
     }
-    addItem(y, period, row, { code: c.id, span, thick: false, snap: snapOf(c), ...sizeFields(c, span) }, status);
+    addItem(y, period, row, { code: c.id, span, thick: false, snap: snapOf(c), ...sizeFields(c, span) }, st(period, span));
   }
   if (skipped.length && !silent) alert(`Fick inte plats med: ${skipped.join(", ")}. Flytta eller ta bort kurser och försök igen.`);
 }
@@ -1053,6 +1153,24 @@ dlg.addEventListener("click", (ev) => {
     renderPlan();
   }
 });
+// Räkna en kurs utanför studieplanen till en profilering (industriell ekonomi)
+dlg.addEventListener("change", (ev) => {
+  const sel = ev.target.closest("[data-profile-as]");
+  if (!sel) return;
+  const it = state.plan.items.find((x) => x.id === sel.dataset.profileAs);
+  if (!it) return;
+  if (sel.value) {
+    const ok = confirm(`Har du kontrollerat med programansvarig att ${itemName(it)} får räknas till profileringen ${PROFILES[sel.value]}?\n\nSidan är bara ett hjälpmedel och inte ett officiellt verktyg. Det är programansvarig och Examensenheten som avgör vad som räknas i din examen.`);
+    if (!ok) { sel.value = it.profileAs || ""; return; }
+    it.profileAs = sel.value;
+  } else {
+    delete it.profileAs;
+  }
+  changed();
+  renderPlan();
+  openItem(it.id);
+});
+
 dlg.addEventListener("close", () => { state.picker = null; dlgHandler = null; dlgDirty = null; });
 
 function openDialog(html, handler = null) {
@@ -1087,6 +1205,15 @@ function openItem(id) {
     ${c?.prereq ? `<p class="small"><strong>Behörighet:</strong> ${esc(c.prereq)}</p>` : ""}
     ${eligBlock(it)}
     ${c?.note ? `<p class="small muted">${esc(c.note)}</p>` : ""}
+    ${P().id === "I" && !c?.inStudyPlan ? `
+      <h3 class="pick-h">Profilering</h3>
+      <label class="field">Räkna kursen till en profilering
+        <select data-profile-as="${esc(it.id)}">
+          <option value="">Nej</option>
+          ${Object.entries(PROFILES).map(([k, n]) => `<option value="${k}" ${it.profileAs === k ? "selected" : ""}>${esc(n)}</option>`).join("")}
+        </select>
+      </label>
+      <p class="muted small" style="margin:4px 0 0">För kurser utanför studieplanen som programansvarig har godkänt inom en profilering.</p>` : ""}
     <h3 class="pick-h">Status</h3>
     <div class="seg" role="group" aria-label="Status">
       ${Object.entries(STATUSES).reverse().map(([k, l]) => `<button data-set-status="${k}" data-id="${esc(it.id)}" class="${it.status === k ? "on" : ""}" aria-pressed="${it.status === k}">${l}</button>`).join("")}

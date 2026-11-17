@@ -19,7 +19,7 @@ import { LEVELS, periodsOf, yearOfTerm } from "./courses.js";
 import { INFO } from "./course-info.js";
 import { SEED_FOLDERS, SEED_EXTRA_COURSES } from "./folders.js";
 import { REQS } from "./reqs.js";
-import { P, PROGRAM_LIST, PLAN_FOLDER, progFolder, isVirtualFolder } from "./programs.js";
+import { P, PROGRAM_LIST, PLAN_FOLDER, progFolder, isVirtualFolder, obligatoryFor, startYearOf, oldCourses } from "./programs.js";
 
 export const pool = { courses: [], byId: {}, folders: [], seedIds: new Set(), overridden: new Set() };
 
@@ -41,7 +41,7 @@ export function cleanReq(r) {
     .filter(Boolean).slice(0, 20);
   return { hp, c };
 }
-const RULE_FIELDS = ["type", "oneOf", "thick", "techNat", "inStudyPlan", "uni", "profile", "progs"];
+const RULE_FIELDS = ["type", "oneOf", "thick", "techNat", "inStudyPlan", "uni", "profile", "progs", "oblPeriods"];
 
 const semOf = (periods) => (periods[0] <= 2 ? "HT" : "VT");
 
@@ -136,10 +136,23 @@ function programCourses() {
   const cur = P();
   const list = [];
   const byId = {};
-  for (const x of cur.courses) {
+  for (const x of [...cur.courses, ...oldCourses(cur)]) {
+    if (byId[x.code]) continue;
     const c = fromStudyPlan(x, cur, true);
+    if (x.areas) Object.assign(c, { areas: x.areas, teknik: x.teknik, note: "Kurs från en äldre studieplan." });
     list.push(c);
     byId[c.id] = c;
+  }
+  // Obligatoriska kurser och rekommenderat år enligt studieplanerna för studentens startår
+  const obl = obligatoryFor(cur, startYearOf());
+  for (const c of list) {
+    const o = obl.get(c.id);
+    if (o) {
+      Object.assign(c, { type: "obl", year: o.year, oblPeriods: o.periods });
+      if (o.periods.length) addOffering(c.offerings, o.periods);
+    } else if (c.type === "obl") {
+      c.type = "val"; // obligatorisk i en annan årgångs plan, men inte i studentens
+    }
   }
   for (const prog of PROGRAM_LIST) {
     if (prog === cur) continue;
