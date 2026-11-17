@@ -308,3 +308,23 @@ grant select, update, delete on public.access_requests to authenticated;
 revoke execute on function public.check_signup_email() from public, anon, authenticated;
 revoke execute on function public.is_admin() from public, anon;
 grant execute on function public.is_admin() to authenticated;
+
+-- ---------- Vänner ----------
+-- Man kan lägga till studenter från andra program som vänner. Deras planer syns då bland ens
+-- egna klasskompisar. Listan är enkelriktad och bara den egna listan syns.
+create table if not exists public.friends (
+  user_id    uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  friend_id  uuid not null references auth.users (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (user_id, friend_id),
+  check (user_id <> friend_id)
+);
+alter table public.friends enable row level security;
+drop policy if exists "Egna vänner" on public.friends;
+create policy "Egna vänner" on public.friends
+  for all to authenticated
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
+
+revoke all on public.friends from anon, authenticated;
+grant select, insert, delete on public.friends to authenticated;

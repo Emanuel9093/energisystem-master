@@ -211,6 +211,31 @@ export async function loadClassmates(user) {
   return data.map(fromRow).filter((p) => p.name).sort((a, b) => a.name.localeCompare(b.name, "sv"));
 }
 
+// ---------- Vänner (studenter från andra program som visas bland ens klasskompisar) ----------
+
+export async function loadFriends(user) {
+  if (DEMO) return lsGet("es-friends", []);
+  const { data, error } = await (await client()).from("friends").select("friend_id").eq("user_id", user.id);
+  if (error) {
+    // Tabellen finns inte förrän schema.sql har körts igen; sidan fungerar ändå utan vänner.
+    console.warn("Kunde inte läsa vänner:", error.message);
+    return [];
+  }
+  return data.map((r) => r.friend_id);
+}
+
+export async function addFriend(user, id) {
+  if (DEMO) return lsSet("es-friends", [...new Set([...lsGet("es-friends", []), id])]);
+  const { error } = await (await client()).from("friends").upsert({ user_id: user.id, friend_id: id }, { ignoreDuplicates: true });
+  if (error) throw error;
+}
+
+export async function removeFriend(user, id) {
+  if (DEMO) return lsSet("es-friends", lsGet("es-friends", []).filter((x) => x !== id));
+  const { error } = await (await client()).from("friends").delete().eq("user_id", user.id).eq("friend_id", id);
+  if (error) throw error;
+}
+
 // ---------- Kurspoolen (delad mellan alla) ----------
 
 const lsGet = (k, fallback) => { try { return JSON.parse(localStorage.getItem(k)) ?? fallback; } catch { return fallback; } };
@@ -355,4 +380,4 @@ const DEMO_CLASSMATES = [
     { id: "i6", code: "1TS363", status: "ongoing", year: 4, period: 1, row: 1, span: 1 },
     { id: "i7", code: "1TS328", status: "planned", year: 4, period: 2, row: 0, span: 1 },
   ] },
-].map(normalize);
+].map((p, i) => normalize({ user_id: "demo-" + i, ...p }));

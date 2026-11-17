@@ -170,6 +170,8 @@ export function guideHTML(prog) {
         ${prog.id === "I" ? `<details><summary>Hur väljer jag profileringskurser?</summary>
           <p>Profileringskurserna har en etikett med profileringens namn i kursväljaren och i Kurspoolen. Du behöver minst 20 hp i den ena profileringen och minst 10 hp i den andra, och sedan 10 hp till som passar profilerna. Panelen Examenskrav visar hur långt du har kommit.</p>
           <p>Har programansvarig godkänt att en kurs utanför studieplanen räknas till en profilering kan du klicka på kursen i din plan och välja profileringen under <em>Räkna kursen till en profilering</em>. Sidan är bara ett hjälpmedel, så kontrollera alltid med programansvarig först.</p></details>` : ""}
+        <details><summary>Kan jag se vad mina vänner på andra program läser?</summary>
+          <p>Ja. Sök på personens namn under fliken med studenter, klicka på hen och välj <em>Lägg till som vän</em>. Vännen visas sedan bland dina klasskompisar, så att du ser om ni läser samma kurser. Bara du ser din vänlista, och den andra personen får ingen fråga.</p></details>
         <details><summary>Kan jag lägga en kurs i en period där den inte ges?</summary>
           <p>Kursväljaren visar de kurser som ges i perioden du klickade på, och de hamnar alltid i rätt perioder. Läser du en kurs på egen hand och tentar den i en annan period eller på sommaren kan du söka efter den, klicka på den och välja <em>Lägg till ändå</em>. Den får då ett varningstecken i planen. Har kursen bytt perioder kan du rätta det i Kurspoolen under <em>Ändra</em>.</p></details>
         ${es ? `<details><summary>Vad är kurspaketet i teknikbaserat entreprenörskap?</summary>

@@ -532,6 +532,7 @@ legend { font-size: 13px; font-weight: 700; color: var(--accent); padding: 0 4px
 .other-time { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
 .other-time .person { opacity: 0.8; }
 button.person { border: 0; font: inherit; font-size: 13px; color: var(--text); cursor: pointer; }
+.prog-tag { font-size: 11px; font-weight: 600; padding: 0 5px; border-radius: 4px; background: var(--surface); color: var(--muted); border: 1px solid var(--border); }
 button.person:hover { background: var(--accent-soft); outline: 1px solid var(--es-teal); }
 .avatar.big { width: 30px; height: 30px; font-size: 12px; vertical-align: middle; }
 .person-plan ul { margin: 0; padding: 0; list-style: none; }

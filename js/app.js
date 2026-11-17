@@ -1,7 +1,7 @@
 import { LEVELS, KNOWN_AREAS } from "./courses.js";
 import { evaluate, STATUSES } from "./rules.js";
 import { pool, buildPool, courseById, coursesIn, inFolder, courseData, offeringText, safeUrl, HP_KEYS, cleanReq } from "./pool.js";
-import { P, setProgram, PROGRAMS, PROGRAM_LIST, planYears } from "./programs.js";
+import { P, setProgram, PROGRAMS, PROGRAM_LIST, planYears, programOf } from "./programs.js";
 import { FIRST_VERSION, LATEST_VERSION } from "./versions.js";
 import { PROFILES } from "./program-i.js";
 import * as store from "./store.js";
@@ -36,6 +36,7 @@ const state = {
   plan: store.emptyPlan(),
   mates: [],      // andra studenter i samma program
   allMates: [],   // alla andra studenter
+  friends: [],    // user_id för vänner (studenter från andra program som också visas)
   admin: false,   // får godkänna förfrågningar om konto
   requests: null,
   poolRows: { courseRows: [], folderRows: [] },
@@ -84,9 +85,27 @@ function applyProgram(id) {
 }
 const savedProgram = () => { try { return localStorage.getItem("es-program") || "ES"; } catch { return "ES"; } };
 
-// Bara studenter i samma program visas (eget upplägg: alla).
+// Studenter i samma program visas, och vänner från andra program (eget upplägg: alla).
+const isFriend = (m) => state.friends.includes(m.user_id);
+const otherProgram = (m) => P().id !== "none" && m.program !== P().id;
 function filterMates() {
-  state.mates = P().id === "none" ? state.allMates : state.allMates.filter((m) => m.program === P().id);
+  state.mates = state.allMates.filter((m) => !otherProgram(m) || isFriend(m));
+}
+const progLabel = (m) => programOf(m.program).name;
+
+async function toggleFriend(m) {
+  const add = !isFriend(m);
+  try {
+    if (add) await store.addFriend(state.user, m.user_id);
+    else await store.removeFriend(state.user, m.user_id);
+  } catch (e) {
+    alert((add ? "Kunde inte lägga till vännen: " : "Kunde inte ta bort vännen: ") + e.message);
+    return;
+  }
+  state.friends = add ? [...state.friends, m.user_id] : state.friends.filter((x) => x !== m.user_id);
+  filterMates();
+  if (state.view === "mates") renderMates();
+  openPerson(m.user_id);
 }
 
 // Byter program och bygger om kurspoolen. fresh: nytt konto. setup: { start, now: { y, p }, markDone }
@@ -253,10 +272,11 @@ async function afterLogin() {
   }
   $("#tabs").hidden = false;
   try {
-    const [plan, mates, poolRows, grades, admin] = await Promise.all([
+    const [plan, mates, poolRows, grades, admin, friends] = await Promise.all([
       store.loadMyPlan(state.user), store.loadClassmates(state.user), store.loadPool(), store.loadGrades(state.user), store.isAdmin(state.user),
+      store.loadFriends(state.user),
     ]);
-    Object.assign(state, { plan, allMates: mates, poolRows, grades, admin, requests: null });
+    Object.assign(state, { plan, allMates: mates, poolRows, grades, admin, friends, requests: null });
     applyProgram(plan.program);
     filterMates();
     buildPool(poolRows.courseRows, poolRows.folderRows);
@@ -1086,7 +1106,7 @@ dlg.addEventListener("click", (ev) => {
   if (dlg.querySelector(".unsaved")) return;
   if (onBackdrop(ev) || ev.target.closest("[data-close]")) return requestClose();
   const person = ev.target.closest("[data-person]");
-  if (person) return openPerson(Number(person.dataset.person));
+  if (person) return openPerson(person.dataset.person);
   if (dlgHandler) return dlgHandler(ev);
   if (ev.target.closest("[data-back]") && state.picker) return renderPicker();
   if (ev.target.closest("[data-open-custom]")) {
@@ -1919,9 +1939,9 @@ function personChip(m, status, me = false) {
   if (me) {
     return `<span class="person me" title="${esc(STATUSES[st])}"><span class="avatar">${esc(initials(state.plan.name || "Du"))}</span>Du<span class="dot ${st}"></span></span>`;
   }
-  const i = state.mates.indexOf(m);
-  return `<button class="person" data-person="${i}" title="${esc(m.name)} · ${esc(STATUSES[st])} – visa hela planen">
-    <span class="avatar">${esc(initials(m.name))}</span>${esc(m.name)}<span class="dot ${st}"></span></button>`;
+  const prog = otherProgram(m) ? ` <span class="prog-tag">${esc(programOf(m.program).short || progLabel(m))}</span>` : "";
+  return `<button class="person" data-person="${esc(m.user_id)}" title="${esc(m.name)}${otherProgram(m) ? ` (${esc(progLabel(m))})` : ""} · ${esc(STATUSES[st])} – visa hela planen">
+    <span class="avatar">${esc(initials(m.name))}</span>${esc(m.name)}${prog}<span class="dot ${st}"></span></button>`;
 }
 
 function renderMates() {
@@ -1955,9 +1975,11 @@ function renderMates() {
   }).join("");
 
   // 2. Sök ESare eller kurs
-  let searchHtml = `<p class="muted small" style="margin:0">Sök på ett namn för att se en persons hela plan, eller på en kurs för att se vilka som läser den.</p>`;
+  const noDot = (html) => html.replace(/<span class="dot[^>]*><\/span>/, "");
+  let searchHtml = `<p class="muted small" style="margin:0">Sök på ett namn för att se en persons hela plan, eller på en kurs för att se vilka som läser den. Du kan också söka fram studenter från andra program och lägga till dem som vänner.</p>`;
   if (q) {
     const people = state.mates.filter((m) => m.name.toLowerCase().includes(q));
+    const others = state.allMates.filter((m) => otherProgram(m) && !isFriend(m) && m.name.toLowerCase().includes(q)).slice(0, 30);
     const courses = new Map();
     for (const m of state.mates) {
       for (const it of m.items) {
@@ -1973,20 +1995,29 @@ function renderMates() {
     }
     const list = [...courses.values()].sort((a, b) => b.takers.length - a.takers.length).slice(0, 30);
     searchHtml = `
-      ${people.length ? `<h3 class="pick-h">${Who()}</h3><div class="people">${people.map((m) => personChip(m, "planned").replace(/<span class="dot[^>]*><\/span>/, "")).join("")}</div>` : ""}
+      ${people.length ? `<h3 class="pick-h">${Who()}${state.friends.length ? " och vänner" : ""}</h3><div class="people">${people.map((m) => noDot(personChip(m, "planned"))).join("")}</div>` : ""}
+      ${others.length ? `<h3 class="pick-h">Andra program</h3><p class="muted small" style="margin:0 0 6px">Klicka på en person för att se planen och lägga till hen som vän.</p><div class="people">${others.map((m) => noDot(personChip(m, "planned"))).join("")}</div>` : ""}
       ${list.length ? `<h3 class="pick-h">Kurser</h3>${list.map((x) => `
         <div class="mate-course compact">
           <div><div class="course-name">${esc(x.name)}</div><div class="course-meta">${x.code ? `<span>${esc(x.code)}</span>` : ""}<span>${x.hp} hp</span></div></div>
           <div class="people">${x.takers.map(({ m, it }) => personChip(m, it.status)).join("")}</div>
         </div>`).join("")}` : ""}
-      ${!people.length && !list.length ? `<p class="muted small" style="margin:0">Ingen annan ${one()} eller kurs matchar "${esc(state.mateQuery.trim())}".</p>` : ""}`;
+      ${!people.length && !others.length && !list.length ? `<p class="muted small" style="margin:0">Ingen annan ${one()} eller kurs matchar "${esc(state.mateQuery.trim())}".</p>` : ""}`;
   }
+
+  const friendList = state.allMates.filter((m) => isFriend(m) && otherProgram(m));
+  const friendsHtml = friendList.length ? `
+      <section class="card">
+        <h2 style="margin:0 0 6px">Vänner från andra program</h2>
+        <p class="muted small" style="margin:0 0 10px">De räknas med ovan när du ser vilka som läser samma kurser som du. Klicka på en vän för att se planen eller ta bort hen.</p>
+        <div class="people">${friendList.map((m) => noDot(personChip(m, "planned"))).join("")}</div>
+      </section>` : "";
 
   app.innerHTML = `
     <div class="stack">
       <div>
         <h1>${Who()}</h1>
-        <p class="muted" style="margin:0">Sidan är öppen för alla ${who()}. Se vilka som läser samma kurser som du, samtidigt, och klicka på en person för att se hela hens plan. ${whoN(state.mates.length)} har lagt in sina kurser.</p>
+        <p class="muted" style="margin:0">Sidan är öppen för alla ${who()}. Se vilka som läser samma kurser som du, samtidigt, och klicka på en person för att se hela hens plan. ${whoN(state.mates.filter((m) => !otherProgram(m)).length)} har lagt in sina kurser. Studenter från andra program kan du söka fram och lägga till som vänner.</p>
       </div>
       <div class="legend"><span><span class="dot done"></span> Klar</span><span><span class="dot ongoing"></span> Läser nu</span><span><span class="dot planned"></span> Planerar</span></div>
 
@@ -1994,6 +2025,8 @@ function renderMates() {
         <h2 class="card-title">Mina pågående och planerade kurser</h2>
         ${mineHtml || `<p class="muted empty-pad">Du har inga pågående eller planerade kurser. Lägg till kurser under Min plan.</p>`}
       </section>
+
+      ${friendsHtml}
 
       <section class="card">
         <h2 style="margin:0 0 10px">Sök</h2>
@@ -2004,7 +2037,7 @@ function renderMates() {
 
   app.onclick = (ev) => {
     const b = ev.target.closest("[data-person]");
-    if (b) openPerson(Number(b.dataset.person));
+    if (b) openPerson(b.dataset.person);
   };
   const mq = $("#mate-q");
   mq.oninput = () => {
@@ -2018,8 +2051,8 @@ function renderMates() {
 }
 
 // Hela planen för en annan ESare
-function openPerson(i) {
-  const m = state.mates[i];
+function openPerson(id) {
+  const m = state.allMates.find((x) => x.user_id === id);
   if (!m) return;
   state.picker = null;
   const myKeys = new Set(state.plan.items.map(itemKey));
@@ -2041,7 +2074,7 @@ function openPerson(i) {
     <div class="dlg-head">
       <div>
         <h2><span class="avatar big">${esc(initials(m.name))}</span> ${esc(m.name)}</h2>
-        <p class="muted small">${m.start_year ? `Började ${m.start_year} · ` : ""}${total} hp i planen${m.hide_done ? " · visar bara kurserna som pågår" : ""}</p>
+        <p class="muted small">${otherProgram(m) ? `${esc(progLabel(m))} · ` : ""}${m.start_year ? `Började ${m.start_year} · ` : ""}${total} hp i planen${m.hide_done ? " · visar bara kurserna som pågår" : ""}</p>
       </div>
       <button class="icon-btn" data-close aria-label="Stäng">✕</button>
     </div>
@@ -2051,7 +2084,11 @@ function openPerson(i) {
         <h3 class="pick-h">${esc(b.title)}${b.sub ? ` <span class="muted">${esc(b.sub)}</span>` : ""} <span class="muted">· ${b.list.reduce((s, it) => s + itemHp(it), 0)} hp</span></h3>
         <ul>${b.list.map(rowHtml).join("")}</ul>`).join("") || `<p class="muted">Inga kurser att visa.</p>`}
     </div>
-    <div class="dlg-foot"><span></span><button class="btn" data-close>Stäng</button></div>`);
+    <div class="dlg-foot">${otherProgram(m)
+      ? `<button class="btn ${isFriend(m) ? "" : "primary"}" data-friend>${isFriend(m) ? "Ta bort som vän" : "Lägg till som vän"}</button>`
+      : "<span></span>"}<button class="btn" data-close>Stäng</button></div>`, (ev) => {
+    if (ev.target.closest("[data-friend]")) toggleFriend(m);
+  });
 }
 
 // ---------- Förfrågningar om konto (bara administratörer) ----------
