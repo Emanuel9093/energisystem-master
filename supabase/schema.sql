@@ -1,6 +1,7 @@
 -- Kör hela filen i Supabase: SQL Editor → New query → klistra in → Run.
--- Vem som helst kan skapa ett konto med e-post och lösenord. Allt nedan kräver inloggning
--- (rollen authenticated); Row Level Security avgör sedan vilka rader man kommer åt.
+-- Nya konton kräver skolmail eller en godkänd adress (se slutet av filen). Nästan allt kräver
+-- inloggning (rollen authenticated); Row Level Security avgör sedan vilka rader man kommer åt.
+-- Filen går att köra flera gånger.
 
 -- En rad per student med namn och kursplan
 create table if not exists public.plans (
@@ -207,3 +208,103 @@ grant select, insert, update, delete on public.grades to authenticated;
 -- Funktioner: bara de som sidan anropar får köras av inloggade.
 revoke execute on function public.pool_set_editor(), public.pool_log() from public, anon, authenticated;
 grant execute on function public.classmate_plans() to authenticated;
+
+-- ---------- Vem som får skapa konto ----------
+-- Nya konton måste använda skolmailen (@student.uu.se). Andra adresser fungerar bara om en
+-- administratör har godkänt dem (tabellen allowed_emails). Konton som redan finns påverkas inte,
+-- eftersom kontrollen bara körs när ett nytt konto skapas.
+--
+-- Gör dig själv till administratör (byt ut adressen, kör en gång):
+--   insert into public.admins (user_id) select id from auth.users where email = 'din@epost.se';
+
+create table if not exists public.admins (
+  user_id uuid primary key references auth.users (id) on delete cascade
+);
+alter table public.admins enable row level security;
+drop policy if exists "Se om man är administratör" on public.admins;
+create policy "Se om man är administratör" on public.admins
+  for select to authenticated
+  using (user_id = auth.uid());
+
+create or replace function public.is_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (select 1 from public.admins where user_id = auth.uid())
+$$;
+
+-- Adresser som får skapa konto fast de inte är skolmail
+create table if not exists public.allowed_emails (
+  email    text primary key check (email = lower(email) and char_length(email) between 3 and 254),
+  added_at timestamptz not null default now(),
+  added_by text not null default coalesce(auth.jwt() ->> 'email', '')
+);
+alter table public.allowed_emails enable row level security;
+drop policy if exists "Administratörer hanterar godkända adresser" on public.allowed_emails;
+create policy "Administratörer hanterar godkända adresser" on public.allowed_emails
+  for all to authenticated
+  using (public.is_admin())
+  with check (public.is_admin());
+
+-- Förfrågningar från studenter utan tillgång till skolmailen. Vem som helst kan skicka en
+-- (även utloggad), men bara administratörer kan läsa och svara.
+create table if not exists public.access_requests (
+  id         uuid primary key default gen_random_uuid(),
+  email      text not null check (email = lower(email) and char_length(email) between 3 and 254),
+  name       text not null check (char_length(name) between 1 and 80),
+  program    text not null default '' check (char_length(program) <= 40),
+  message    text not null default '' check (char_length(message) <= 500),
+  status     text not null default 'new' check (status in ('new', 'approved', 'rejected')),
+  created_at timestamptz not null default now()
+);
+-- En öppen förfrågan per adress
+create unique index if not exists access_requests_one_open on public.access_requests (email) where status = 'new';
+alter table public.access_requests enable row level security;
+drop policy if exists "Skicka förfrågan" on public.access_requests;
+create policy "Skicka förfrågan" on public.access_requests
+  for insert to anon, authenticated
+  with check (status = 'new');
+drop policy if exists "Administratörer läser förfrågningar" on public.access_requests;
+create policy "Administratörer läser förfrågningar" on public.access_requests
+  for select to authenticated
+  using (public.is_admin());
+drop policy if exists "Administratörer svarar på förfrågningar" on public.access_requests;
+create policy "Administratörer svarar på förfrågningar" on public.access_requests
+  for update to authenticated
+  using (public.is_admin())
+  with check (public.is_admin());
+drop policy if exists "Administratörer tar bort förfrågningar" on public.access_requests;
+create policy "Administratörer tar bort förfrågningar" on public.access_requests
+  for delete to authenticated
+  using (public.is_admin());
+
+-- Stoppar nya konton som varken är skolmail eller godkända
+create or replace function public.check_signup_email()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if lower(split_part(new.email, '@', 2)) = 'student.uu.se'
+     or exists (select 1 from public.allowed_emails a where a.email = lower(new.email)) then
+    return new;
+  end if;
+  raise exception 'Använd din skolmail (@student.uu.se) eller begär ett konto.';
+end;
+$$;
+
+create or replace trigger check_signup_email
+  before insert on auth.users
+  for each row execute function public.check_signup_email();
+
+grant select on public.admins to authenticated;
+grant select, insert, update, delete on public.allowed_emails to authenticated;
+grant insert on public.access_requests to anon, authenticated;
+grant select, update, delete on public.access_requests to authenticated;
+revoke execute on function public.check_signup_email() from public, anon, authenticated;
+revoke execute on function public.is_admin() from public, anon;
+grant execute on function public.is_admin() to authenticated;

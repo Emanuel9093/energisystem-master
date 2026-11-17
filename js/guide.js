@@ -1,6 +1,9 @@
-// Guidesidan: vad som krävs för examen och hur sidan används.
+// Guidesidan: vad som krävs för examen och hur sidan används. Kraven skiljer sig
+// mellan programmen, resten är gemensamt.
 
-const PARTS = [
+import { SCHOOL_DOMAIN } from "./store.js";
+
+const PARTS_ES = [
   { hp: 175, label: "Obligatoriska kurser åk 1–3", sub: "inkl. självständigt arbete 15 hp", cls: "p-obl" },
   { hp: 30, label: "Teknik och system", sub: "minst 3 kurser à 10 hp", cls: "p-ts" },
   { hp: 30, label: "Examensarbete", sub: "30 hp, A2E", cls: "p-ex" },
@@ -8,37 +11,32 @@ const PARTS = [
   { hp: 30, label: "Valfritt", sub: "vilket ämne som helst vid UU/SLU", cls: "p-free" },
 ];
 
-export function guideHTML() {
-  return `
-    <div class="guide">
-      <header class="guide-hero card">
-        <img src="assets/es-logo.png" alt="" width="120">
-        <div>
-          <h1>Så funkar ES Masterplanering</h1>
-          <p>Här planerar du dina fem år på Civilingenjörsprogrammet i energisystem, ser direkt om planen räcker till examen
-          och ser vilka kurser andra ESare läser. Läs igenom sidan en gång, så kommer du igång på fem minuter.</p>
-          <nav class="guide-toc">
-            <a href="#g-krav">Vad krävs för examen?</a>
-            <a href="#g-start">Kom igång</a>
-            <a href="#g-flikar">Flikarna</a>
-            <a href="#g-integritet">Vad syns för andra?</a>
-            <a href="#g-faq">Vanliga frågor</a>
-          </nav>
-        </div>
-      </header>
+const PARTS_I = [
+  { hp: 180, label: "Obligatoriska kurser åk 1–3", sub: "inkl. självständigt arbete 15 hp", cls: "p-obl" },
+  { hp: 35, label: "Obligatoriska kurser åk 4–5", sub: "ledning, strategi och vetenskaplig metod", cls: "p-ts" },
+  { hp: 30, label: "Examensarbete", sub: "30 hp, A2E", cls: "p-ex" },
+  { hp: 40, label: "Profileringskurser", sub: "20 + 10 hp i profileringarna och 10 hp till", cls: "p-val" },
+  { hp: 15, label: "Valfritt", sub: "högst 15 hp, vid UU eller annat lärosäte", cls: "p-free" },
+];
 
-      <section class="card" id="g-krav">
-        <h2>Vad krävs för civilingenjörsexamen?</h2>
-        <p>Examen omfattar <strong>300 hp</strong>. De tre första åren är nästan helt obligatoriska. Under år 4–5 väljer du
-        själv kurser, men valen måste uppfylla kraven nedan. Så här brukar de 300 hp fördelas:</p>
+const link = (url, text) => `<a href="${url}" target="_blank" rel="noopener">${text}</a>`;
+
+function hpBar(parts) {
+  return `
         <div class="hp-bar" role="img" aria-label="Fördelning av 300 hp">
-          ${PARTS.map((p) => `<div class="${p.cls}" style="flex:${p.hp}"><strong>${p.hp} hp</strong><span>${p.label}</span></div>`).join("")}
+          ${parts.map((p) => `<div class="${p.cls}" style="flex:${p.hp}"><strong>${p.hp} hp</strong><span>${p.label}</span></div>`).join("")}
         </div>
         <div class="hp-legend">
-          ${PARTS.map((p) => `<div><i class="${p.cls}"></i><span><strong>${p.label}</strong> · ${p.hp} hp<br><small>${p.sub}</small></span></div>`).join("")}
+          ${parts.map((p) => `<div><i class="${p.cls}"></i><span><strong>${p.label}</strong> · ${p.hp} hp<br><small>${p.sub}</small></span></div>`).join("")}
         </div>
-        <p class="muted small">Fördelningen är ett exempel. Valbara och valfria kurser kan bytas mot varandra så länge kraven nedan är uppfyllda.</p>
+        <p class="muted small">Fördelningen är ett exempel. Valbara och valfria kurser kan bytas mot varandra så länge kraven nedan är uppfyllda.</p>`;
+}
 
+function kravES(prog) {
+  return `
+        <p>Examen omfattar <strong>300 hp</strong>. De tre första åren är nästan helt obligatoriska. Under år 4–5 väljer du
+        själv kurser, men valen måste uppfylla kraven nedan. Så här brukar de 300 hp fördelas:</p>
+        ${hpBar(PARTS_ES)}
         <h3>Kraven som sidan kontrollerar</h3>
         <ol class="req-list">
           <li><strong>300 hp totalt</strong> med godkända kurser. Det går bra att ta ut examen med upp till 304,5 hp.</li>
@@ -52,15 +50,77 @@ export function guideHTML() {
           <li><strong>Högst 30 hp valfria kurser</strong> utanför studieplanen, från vilket huvudområde som helst vid UU eller SLU. Här ingår också kurspaketet i teknikbaserat entreprenörskap.</li>
         </ol>
         <p>Vissa kurser får inte räknas in tillsammans, till exempel 1TS309/1GV134 och 1KB274/1KB765. Sidan varnar om du har valt båda. Hela listan finns i
-        <a href="https://www.uu.se/utbildning/studieplan?query=10067" target="_blank" rel="noopener">studieplanen</a>, och kraven finns i
-        <a href="https://www.uu.se/utbildning/utbildningsplan?query=8e0ca779-e57a-11f0-af1e-4773ce254d84" target="_blank" rel="noopener">utbildningsplanen</a>.</p>
+        ${link(prog.studyPlanUrl, "studieplanen")}, och kraven finns i ${link(prog.eduPlanUrl, "utbildningsplanen")}.</p>`;
+}
+
+function kravI(prog) {
+  return `
+        <p>Examen omfattar <strong>300 hp</strong>. De tre första åren är obligatoriska. Under år 4–5 läser du några obligatoriska kurser
+        och väljer kurser i de två profileringarna <em>Affärsutveckling och innovation</em> och <em>Industriell analys och digitalisering</em>.
+        Så här brukar de 300 hp fördelas:</p>
+        ${hpBar(PARTS_I)}
+        <h3>Kraven som sidan kontrollerar</h3>
+        <ol class="req-list">
+          <li><strong>300 hp totalt</strong> med godkända kurser. Det går bra att ta ut examen med upp till 304,5 hp.</li>
+          <li><strong>Alla obligatoriska kurser</strong> i studieplanen, inklusive Självständigt arbete i industriell ekonomi (15 hp).</li>
+          <li><strong>Examensarbete 30 hp</strong> på A2E-nivå inom teknik (termin 10).</li>
+          <li><strong>Minst 90 hp på avancerad nivå</strong>, examensarbetet inräknat. <strong>Minst 10 hp</strong> av dem ska vara på <strong>A1F-nivå</strong>, examensarbetet inte inräknat.</li>
+          <li><strong>Minst 150 hp inom huvudområdet teknik</strong>, varav <strong>minst 60 hp på avancerad nivå</strong>.</li>
+          <li><strong>Minst 20 hp i en profilering och minst 10 hp i den andra.</strong> Etik i teknik och organisering (1TS353) räknas till vilken som helst av dem. Profileringskurserna ges termin 7–9.</li>
+          <li><strong>Ytterligare 10 hp som passar profilerna.</strong> Sidan räknar profileringskurser utöver 20 + 10 hp. Andra kurser kan också passa, fråga studievägledningen.</li>
+          <li><strong>Högst 15 hp valfria kurser</strong>, vid UU eller vid andra lärosäten i eller utanför Sverige.</li>
+        </ol>
+        <p>Vissa kurser får inte räknas in tillsammans, till exempel Organisering av teknikintensivt arbete (1TS363) och Organisering av kunskapsintensivt arbete (1TE779),
+        och Modellering och optimering av produktionssystem (1TS360) och av logistiska system (1TE776). Sidan varnar om du har valt båda. Hela listan finns i
+        ${link(prog.studyPlanUrl, "studieplanen")}, och kraven finns i ${link(prog.eduPlanUrl, "utbildningsplanen")}.</p>`;
+}
+
+function kravNone() {
+  return `
+        <p>Du har valt att fylla i planen själv, utan programplan. Sidan kontrollerar då bara de allmänna kraven för
+        civilingenjörsexamen vid Uppsala universitet. Ditt programs egna krav, till exempel obligatoriska kurser, kontrolleras inte.
+        Byt program under Min plan om ditt program finns med.</p>
+        <ol class="req-list">
+          <li><strong>300 hp totalt</strong> med godkända kurser.</li>
+          <li><strong>Examensarbete 30 hp</strong> på A2E-nivå inom teknik.</li>
+          <li><strong>Minst 90 hp på avancerad nivå</strong>, varav minst 10 hp på A1F-nivå (examensarbetet inte inräknat).</li>
+          <li><strong>Minst 150 hp inom huvudområdet teknik</strong>, varav minst 60 hp på avancerad nivå.</li>
+        </ol>`;
+}
+
+export function guideHTML(prog) {
+  const who = prog.id === "none" ? "studenter" : prog.people;
+  const Who = who[0].toUpperCase() + who.slice(1);
+  const es = prog.id === "ES";
+  return `
+    <div class="guide">
+      <header class="guide-hero card">
+        <img src="${prog.logo}" alt="" width="120">
+        <div>
+          <h1>Så funkar ${prog.short ? prog.short + " " : ""}Masterplanering</h1>
+          <p>Här planerar du dina fem år${prog.id === "none" ? "" : ` på ${prog.full}`}, ser direkt om planen räcker till examen
+          och ser vilka kurser andra ${who} läser. Läs igenom sidan en gång, så kommer du igång på fem minuter.</p>
+          <nav class="guide-toc">
+            <a href="#g-krav">Vad krävs för examen?</a>
+            <a href="#g-start">Kom igång</a>
+            <a href="#g-flikar">Flikarna</a>
+            <a href="#g-integritet">Vad syns för andra?</a>
+            <a href="#g-faq">Vanliga frågor</a>
+          </nav>
+        </div>
+      </header>
+
+      <section class="card" id="g-krav">
+        <h2>Vad krävs för civilingenjörsexamen?</h2>
+        ${prog.id === "I" ? kravI(prog) : prog.id === "ES" ? kravES(prog) : kravNone()}
       </section>
 
       <section class="card" id="g-start">
         <h2>Kom igång</h2>
         <ol class="steps">
-          <li><strong>Skapa ett konto</strong> med valfri e-postadress och ett lösenord, och bekräfta adressen via mejlet du får. Bocka i <em>Kom ihåg mig</em> så slipper du logga in varje gång. Har du glömt lösenordet kan du återställa det via mejlen.</li>
-          <li><strong>Skriv ditt namn</strong> högst upp under Min plan, så att andra ESare ser vem du är.</li>
+          <li><strong>Skapa ett konto</strong> med din skolmail (@${SCHOOL_DOMAIN}) och ett lösenord, och bekräfta adressen via mejlet du får. Kommer du inte åt skolmailen kan du välja <em>Jag har inte tillgång till min skolmail</em> och begära ett konto med en annan adress. Bocka i <em>Kom ihåg mig</em> så slipper du logga in varje gång. Har du glömt lösenordet kan du återställa det via mejlen.</li>
+          <li><strong>Välj program.</strong> Programmet styr examenskraven, vilka kurser som rekommenderas och vilka studenter du ser. Du kan byta under Min plan.</li>
+          <li><strong>Skriv ditt namn</strong> högst upp under Min plan, så att andra ${who} ser vem du är.</li>
           <li><strong>Kolla år 1–3.</strong> De obligatoriska kurserna är redan ifyllda och markerade som klara. Har du tillgodoräknat något annat
           klickar du på kursen och väljer <em>Ta bort från planen</em> och lägger in det du har läst i stället.</li>
           <li><strong>Planera år 4–5.</strong> Klicka på en tom ruta för att välja kurs. Du ser bara kurser som ges i den perioden. En kurs som går
@@ -76,7 +136,7 @@ export function guideHTML() {
           <li>Tre rader motsvarar normal studietakt (15 hp per period). Läser du utökat klickar du på <em>Lägg till rad</em>.</li>
           <li>Kurser som går över två perioder blir långa. Kurser i högre studietakt blir höga: en rad motsvarar 5 hp per period, så Tidsserieanalys (10 hp i en period) tar två rader och självständigt arbete och examensarbete tar alla tre. Kurser under 10 hp tar alltid en rad.</li>
           <li>Under <em>Hp per huvudområde</em> i panelen till höger ser du hur många hp du har i teknik, matematik, fysik och andra ämnen.</li>
-          <li><strong>Behörighet:</strong> planerade kurser får en <span class="lamp-demo missing"></span> röd lampa om du inte är behörig enligt din plan och en <span class="lamp-demo pending"></span> gul lampa om du blir behörig när dina planerade kurser är klara. Klicka på kursen för att se vad som saknas. Sidan räknar bara hp (totalt, per huvudområde och på avancerad nivå) och vilka kurser du har läst före kursen. Krav som Engelska 6 kontrolleras inte. Har du tillgodoräknat något kan du bocka i <em>Jag är behörig ändå</em>. Kraven som kontrolleras står under <em>Behörighet som kontrolleras</em> när du ändrar en kurs i Kurspoolen, och där kan alla ESare rätta dem.</li>
+          <li><strong>Behörighet:</strong> planerade kurser får en <span class="lamp-demo missing"></span> röd lampa om du inte är behörig enligt din plan och en <span class="lamp-demo pending"></span> gul lampa om du blir behörig när dina planerade kurser är klara. Klicka på kursen för att se vad som saknas. Sidan räknar bara hp (totalt, per huvudområde och på avancerad nivå) och vilka kurser du har läst före kursen. Krav som Engelska 6 kontrolleras inte. Har du tillgodoräknat något kan du bocka i <em>Jag är behörig ändå</em>. Kraven som kontrolleras står under <em>Behörighet som kontrolleras</em> när du ändrar en kurs i Kurspoolen, och där kan alla rätta dem.</li>
           <li><strong>Sommarkurser:</strong> klicka på plustecknet mellan två år för att lägga till en sommar. Sommaren har en enda period och visas som en lista. Sommarkurser kan bara läggas på en sommar.</li>
           <li>Papperskorgen till höger tar bort en rad. Knapparna under rutnätet fyller i årets obligatoriska kurser, markerar hela året som klart eller tömmer året.</li>
         </ul>
@@ -86,8 +146,8 @@ export function guideHTML() {
         <h2>Flikarna</h2>
         <div class="tab-cards">
           <div><h3>Min plan</h3><p>Dina fem år, ett år i taget, och kontrollen av examenskraven. Välj <em>Bara klara kurser</em> för att se hur långt du har kommit.</p></div>
-          <div><h3>ESare</h3><p>Överst ser du dina pågående och planerade kurser och vilka andra ESare som läser dem samma period. Klicka på en person för att se hela hens plan, eller sök efter en person eller kurs.</p></div>
-          <div><h3>Kurspoolen</h3><p>Alla kurser med behörighet, huvudområden och när de ges, sorterade i mappar. Alla ES-studenter kan lägga till kurser, skapa mappar och rätta uppgifter, till exempel om en kurs ges både HT och VT. Ändringarna syns för alla.</p></div>
+          <div><h3>${Who}</h3><p>Överst ser du dina pågående och planerade kurser och vilka andra ${who} som läser dem samma period. Klicka på en person för att se hela hens plan, eller sök efter en person eller kurs.</p></div>
+          <div><h3>Kurspoolen</h3><p>Alla kurser med behörighet, huvudområden och när de ges, sorterade i mappar. Kurserna i andra programs studieplaner finns också med. Alla kan lägga till kurser, skapa mappar och rätta uppgifter, till exempel om en kurs ges både HT och VT. Ändringarna syns för alla.</p></div>
           <div><h3>Mina betyg</h3><p>Fyll i betyg för klara kurser så räknas ditt snitt ut automatiskt, viktat med hp, och du ser en kurva över hur snittet har ändrats termin för termin. G och VG räknas inte in.</p></div>
         </div>
       </section>
@@ -95,7 +155,7 @@ export function guideHTML() {
       <section class="card" id="g-integritet">
         <h2>Vad syns för andra?</h2>
         <ul class="tips">
-          <li><strong>Syns för andra ES-studenter:</strong> ditt namn, startår och vilka kurser du har i planen, med status. Kurserna du läser just nu syns alltid. Bocka i <em>Dölj min plan och avklarade kurser</em> om du inte vill visa vad du har läst och planerar att läsa.</li>
+          <li><strong>Syns för andra inloggade studenter:</strong> ditt namn, startår, program och vilka kurser du har i planen, med status. Under fliken ${Who} visas bara studenter i ditt eget program. Kurserna du läser just nu syns alltid. Bocka i <em>Dölj min plan och avklarade kurser</em> om du inte vill visa vad du har läst och planerar att läsa.</li>
           <li><strong>Syns aldrig för andra:</strong> dina betyg och din e-postadress.</li>
           <li><strong>Kurspoolen är gemensam.</strong> Det du ändrar där syns för alla, med ditt namn som senaste ändrare.</li>
         </ul>
@@ -105,18 +165,20 @@ export function guideHTML() {
         <h2>Vanliga frågor</h2>
         <details><summary>Jag har tillgodoräknat en kurs. Hur gör jag?</summary>
           <p>Ta bort den obligatoriska kursen ur planen och lägg in kursen du läste. Finns den inte i Kurspoolen kan du lägga till den där, eller lägga till en privat kurs längst ner i kursväljaren.</p></details>
-        <details><summary>Ska jag välja examensarbete vid UU eller SLU?</summary>
-          <p>Det beror på var ditt exjobb examineras. Båda räknas, men bara en av dem får ingå. Väljer du den andra varianten i kursväljaren byts den du redan har ut.</p></details>
+        ${es ? `<details><summary>Ska jag välja examensarbete vid UU eller SLU?</summary>
+          <p>Det beror på var ditt exjobb examineras. Båda räknas, men bara en av dem får ingå. Väljer du den andra varianten i kursväljaren byts den du redan har ut.</p></details>` : ""}
+        ${prog.id === "I" ? `<details><summary>Hur väljer jag profileringskurser?</summary>
+          <p>Profileringskurserna har en etikett med profileringens namn i kursväljaren och i Kurspoolen. Du behöver minst 20 hp i den ena profileringen och minst 10 hp i den andra, och sedan 10 hp till som passar profilerna. Panelen Examenskrav visar hur långt du har kommit.</p></details>` : ""}
         <details><summary>Kan jag lägga en kurs i en period där den inte ges?</summary>
           <p>Kursväljaren visar de kurser som ges i perioden du klickade på, och de hamnar alltid i rätt perioder. Läser du en kurs på egen hand och tentar den i en annan period eller på sommaren kan du söka efter den, klicka på den och välja <em>Lägg till ändå</em>. Den får då ett varningstecken i planen. Har kursen bytt perioder kan du rätta det i Kurspoolen under <em>Ändra</em>.</p></details>
-        <details><summary>Vad är kurspaketet i teknikbaserat entreprenörskap?</summary>
-          <p>Ett 30 hp-paket hösten i årskurs 5 som söks i konkurrens. Det räknas till de 30 hp som får väljas fritt och kan inte kombineras med Stora sociotekniska system, Ingenjörsetik eller Miljörätt. Se mappen i Kurspoolen.</p></details>
+        ${es ? `<details><summary>Vad är kurspaketet i teknikbaserat entreprenörskap?</summary>
+          <p>Ett 30 hp-paket hösten i årskurs 5 som söks i konkurrens. Det räknas till de 30 hp som får väljas fritt och kan inte kombineras med Stora sociotekniska system, Ingenjörsetik eller Miljörätt. Se mappen i Kurspoolen.</p></details>` : ""}
         <details><summary>Hur gör jag med utbytesstudier?</summary>
           <p>Kurser du läser på utbyte räknas bara in i examen om de har <strong>tillgodoräknats</strong>. Det gäller alltid, även om kursen liknar en kurs i studieplanen. Prata med studievägledningen innan du åker och ansök om tillgodoräknande när du är hemma igen.
-          I Kurspoolen finns mappen <em>Utbytesstudier</em> med kurser som andra ESare har läst utomlands. Där kan du också lägga till dina egna kurser så att andra ser dem.
+          I Kurspoolen finns mappen <em>Utbytesstudier</em> med kurser som andra studenter har läst utomlands. Där kan du också lägga till dina egna kurser så att andra ser dem.
           Vill du inte dela kursen kan du lägga till den som en privat kurs längst ner i kursväljaren.</p></details>
         <details><summary>Stämmer kontrollen alltid?</summary>
-          <p>Sidan följer studieplanen och utbildningsplanen från HT 2026, men det är ett hjälpmedel. Det är Examensenheten som avgör om du får ut din examen. Fråga studievägledningen om du är osäker.</p></details>
+          <p>Sidan följer studieplanerna och utbildningsplanerna från HT 2026, men det är ett hjälpmedel. Det är Examensenheten som avgör om du får ut din examen. Fråga studievägledningen om du är osäker.</p></details>
       </section>
     </div>`;
 }

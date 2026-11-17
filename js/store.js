@@ -9,7 +9,9 @@ export const DEMO = !SUPABASE_URL || !SUPABASE_ANON_KEY;
 // summers: år som följs av en sommar med sommarkurser.
 // hide_done: planerade och avklarade kurser syns inte för andra ESare (pågående syns alltid).
 export const MIN_YEARS = 5, MAX_YEARS = 8;
-export const emptyPlan = () => ({ name: "", start_year: null, hide_done: false, years: MIN_YEARS, rows: { 1: 3, 2: 3, 3: 3, 4: 3, 5: 3 }, summers: [], items: [] });
+// program: "ES", "I" eller "none" (eget upplägg). Äldre planer saknar fältet och är ES.
+export const PROGRAM_IDS = ["ES", "I", "none"];
+export const emptyPlan = () => ({ name: "", start_year: null, hide_done: false, program: "ES", years: MIN_YEARS, rows: { 1: 3, 2: 3, 3: 3, 4: 3, 5: 3 }, summers: [], items: [] });
 
 const STATUS_OK = new Set(["planned", "ongoing", "done"]);
 const int = (v, lo, hi, d) => { const n = Number(v); return Number.isInteger(n) && n >= lo && n <= hi ? n : d; };
@@ -53,6 +55,7 @@ const normalize = (p) => {
   return {
     ...emptyPlan(), ...p,
     name: txt(p.name, 80), start_year: int(p.start_year, 2010, 2040, null), hide_done: !!p.hide_done,
+    program: PROGRAM_IDS.includes(p.program) ? p.program : "ES",
     years, rows, summers: [...summers].sort((a, b) => a - b), items,
   };
 };
@@ -100,11 +103,20 @@ function authError(error) {
   if (/rate limit|too many/i.test(m)) return new Error("För många försök. Vänta en stund och försök igen.");
   if (/password should be|weak password|at least/i.test(m)) return new Error("Lösenordet är för svagt. Använd minst 8 tecken.");
   if (/same password|different from the old/i.test(m)) return new Error("Det nya lösenordet måste skilja sig från det gamla.");
+  // Databasen stoppar adresser som varken är skolmail eller godkända (supabase/schema.sql)
+  if (/database error saving new user/i.test(m)) {
+    return Object.assign(new Error(`Använd din skolmail (@${SCHOOL_DOMAIN}). Har du inte tillgång till den kan du begära ett konto.`), { notAllowed: true });
+  }
   return new Error(m || "Något gick fel.");
 }
 
+// Demoläget: man är inloggad tills man loggar ut (så att inloggningssidan går att prova).
+const DEMO_OUT = "es-demo-out";
+const demoUser = () => { try { return sessionStorage.getItem(DEMO_OUT) === "1" ? null : { id: "demo", email: "demo@example.com" }; } catch { return null; } };
+const demoLogin = () => { try { sessionStorage.removeItem(DEMO_OUT); } catch { /* ignorera */ } };
+
 export async function getUser() {
-  if (DEMO) return { id: "demo", email: "demo@example.com" };
+  if (DEMO) return demoUser();
   const { data } = await (await client()).auth.getSession();
   return data.session?.user ?? null;
 }
@@ -117,19 +129,28 @@ export async function onAuthChange(cb) {
 
 export async function signIn(email, password, remember) {
   try { localStorage.setItem(REMEMBER_KEY, remember ? "1" : "0"); } catch { /* ignorera */ }
+  if (DEMO) return demoLogin();
   const { error } = await (await client()).auth.signInWithPassword({ email, password });
   if (error) throw authError(error);
 }
 
+// Konton skapas med skolmailen. Andra adresser måste först godkännas av en administratör
+// (tabellen allowed_emails). Kontrollen görs i databasen; här ger vi bara ett tydligt besked.
+export const SCHOOL_DOMAIN = "student.uu.se";
+export const isSchoolEmail = (email) => String(email).toLowerCase().endsWith("@" + SCHOOL_DOMAIN);
+
 // Returnerar true om kontot kan användas direkt, false om e-posten först måste bekräftas.
 export async function signUp(email, password, remember) {
+  if (DEMO && !isSchoolEmail(email) && !lsGet("es-allowed", []).includes(email)) throw authError("Database error saving new user");
   try { localStorage.setItem(REMEMBER_KEY, remember ? "1" : "0"); } catch { /* ignorera */ }
+  if (DEMO) { demoLogin(); try { localStorage.removeItem("es-master-plan-v3"); } catch { /* ignorera */ } return true; }
   const { data, error } = await (await client()).auth.signUp({ email, password, options: { emailRedirectTo: siteUrl() } });
   if (error) throw authError(error);
   return !!data.session;
 }
 
 export async function sendPasswordReset(email) {
+  if (DEMO) return;
   const { error } = await (await client()).auth.resetPasswordForEmail(email, { redirectTo: siteUrl() });
   if (error) throw authError(error);
 }
@@ -140,7 +161,7 @@ export async function updatePassword(password) {
 }
 
 export async function signOut() {
-  if (DEMO) return;
+  if (DEMO) { try { sessionStorage.setItem(DEMO_OUT, "1"); } catch { /* ignorera */ } return; }
   await (await client()).auth.signOut();
 }
 
@@ -148,7 +169,7 @@ export async function signOut() {
 
 const fromRow = (r) => normalize({
   user_id: r.user_id, name: r.name, start_year: r.start_year, hide_done: r.hide_done,
-  years: r.plan?.years, rows: r.plan?.rows, summers: r.plan?.summers, items: r.plan?.items, updated_at: r.updated_at,
+  program: r.plan?.program, years: r.plan?.years, rows: r.plan?.rows, summers: r.plan?.summers, items: r.plan?.items, updated_at: r.updated_at,
 });
 
 export async function loadMyPlan(user) {
@@ -174,7 +195,7 @@ export async function saveMyPlan(user, plan) {
     name: plan.name.trim(),
     start_year: plan.start_year || null,
     hide_done: !!plan.hide_done,
-    plan: { years: plan.years, rows: plan.rows, summers: plan.summers, items: plan.items },
+    plan: { program: plan.program, years: plan.years, rows: plan.rows, summers: plan.summers, items: plan.items },
     updated_at: new Date().toISOString(),
   };
   const { error } = await (await client()).from("plans").upsert(row);
@@ -229,6 +250,70 @@ export async function deletePoolFolder(id) {
   if (error) throw error;
 }
 
+// ---------- Förfrågningar om konto utan skolmail ----------
+// Vem som helst kan skicka en förfrågan (även utloggad). Bara administratörer kan läsa
+// förfrågningarna och godkänna adresser. Se supabase/schema.sql.
+
+export async function requestAccess({ name, email, program, message }) {
+  const row = { name: txt(name, 80).trim(), email: txt(email, 254).trim().toLowerCase(), program: txt(program, 40), message: txt(message, 500).trim() };
+  if (DEMO) {
+    const all = lsGet("es-requests", []);
+    if (all.some((r) => r.email === row.email && r.status === "new")) throw new Error("Det finns redan en förfrågan för den adressen. Du får ett mejl när den är godkänd.");
+    all.unshift({ ...row, id: "r" + Date.now(), status: "new", created_at: new Date().toISOString() });
+    return lsSet("es-requests", all);
+  }
+  const { error } = await (await client()).from("access_requests").insert(row);
+  if (error?.code === "23505") throw new Error("Det finns redan en förfrågan för den adressen. Du får ett mejl när den är godkänd.");
+  if (error) throw authError(error);
+}
+
+export async function isAdmin(user) {
+  if (DEMO) return true;
+  const { data, error } = await (await client()).from("admins").select("user_id").eq("user_id", user.id).maybeSingle();
+  return !error && !!data;
+}
+
+export async function loadRequests() {
+  if (DEMO) return { requests: lsGet("es-requests", []), allowed: lsGet("es-allowed", []).map((email) => ({ email })) };
+  const sb = await client();
+  const [r, a] = await Promise.all([
+    sb.from("access_requests").select("*").order("created_at", { ascending: false }).limit(200),
+    sb.from("allowed_emails").select("*").order("added_at", { ascending: false }).limit(500),
+  ]);
+  if (r.error) throw r.error;
+  if (a.error) throw a.error;
+  return { requests: r.data, allowed: a.data };
+}
+
+// Godkänner en adress (så att den kan skapa konto) och markerar förfrågan som klar.
+export async function allowEmail(email, requestId = null) {
+  email = String(email).trim().toLowerCase();
+  if (DEMO) {
+    lsSet("es-allowed", [...new Set([email, ...lsGet("es-allowed", [])])]);
+    if (requestId) lsSet("es-requests", lsGet("es-requests", []).map((r) => (r.id === requestId ? { ...r, status: "approved" } : r)));
+    return;
+  }
+  const sb = await client();
+  const { error } = await sb.from("allowed_emails").upsert({ email });
+  if (error) throw error;
+  if (requestId) {
+    const u = await sb.from("access_requests").update({ status: "approved" }).eq("id", requestId);
+    if (u.error) throw u.error;
+  }
+}
+
+export async function rejectRequest(requestId) {
+  if (DEMO) return lsSet("es-requests", lsGet("es-requests", []).map((r) => (r.id === requestId ? { ...r, status: "rejected" } : r)));
+  const { error } = await (await client()).from("access_requests").update({ status: "rejected" }).eq("id", requestId);
+  if (error) throw error;
+}
+
+export async function removeAllowedEmail(email) {
+  if (DEMO) return lsSet("es-allowed", lsGet("es-allowed", []).filter((e) => e !== email));
+  const { error } = await (await client()).from("allowed_emails").delete().eq("email", email);
+  if (error) throw error;
+}
+
 // ---------- Betyg (privata, syns bara för en själv) ----------
 
 export async function loadGrades(user) {
@@ -258,4 +343,15 @@ const DEMO_CLASSMATES = [
   { name: "Elin Sjöberg", start_year: 2022, items: demoItems([["1TE035", "done"], ["TN0352", "done"], ["1TE028", "ongoing"], ["TN0350", "ongoing"], ["1RT890", "ongoing"], ["EX1032", "planned"]]) },
   { name: "Viktor Nyström", start_year: 2023, hide_done: true, items: [...demoItems([["1TE029", "ongoing"], ["1TE765", "ongoing"], ["1TE038", "planned"], ["1RT495", "planned"], ["1TE655", "done"]]), { id: "s1", year: 3, summer: true, row: 0, status: "planned", code: "1FA456" }] },
   { name: "Sara Bergman", start_year: 2023, items: demoItems([["1FA410", "ongoing"], ["1TS359", "planned"], ["1TS309", "planned"], ["1FA591", "planned"]]) },
+  { name: "Hugo Ek", start_year: 2022, program: "I", items: [
+    { id: "i1", code: "1DL360", status: "ongoing", year: 4, period: 1, row: 0, span: 1 },
+    { id: "i2", code: "1TE763", status: "ongoing", year: 4, period: 1, row: 1, span: 2 },
+    { id: "i3", code: "1RT700", status: "planned", year: 4, period: 3, row: 0, span: 1 },
+    { id: "i4", code: "1TS354", status: "planned", year: 5, period: 3, row: 0, span: 2, thick: true },
+  ] },
+  { name: "Maja Holm", start_year: 2023, program: "I", items: [
+    { id: "i5", code: "1TS340", status: "ongoing", year: 4, period: 1, row: 0, span: 1 },
+    { id: "i6", code: "1TS363", status: "ongoing", year: 4, period: 1, row: 1, span: 1 },
+    { id: "i7", code: "1TS328", status: "planned", year: 4, period: 2, row: 0, span: 1 },
+  ] },
 ].map(normalize);

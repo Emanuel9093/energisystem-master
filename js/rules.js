@@ -1,8 +1,11 @@
-// Kontrollerar en studieplan mot examenskraven för civilingenjörsexamen i energisystem.
-// Kraven kommer från utbildningsplanen (avsnitten "Preciserade krav").
+// Kontrollerar en studieplan mot examenskraven för civilingenjörsexamen i det program
+// studenten går. Kraven kommer från utbildningsplanerna (avsnitten "Preciserade krav").
+// Gemensamt för alla civilingenjörsprogram vid UU: 300 hp, 90 hp avancerad nivå,
+// 150 hp teknik varav 60 hp avancerad nivå, alla obligatoriska kurser och examensarbete 30 hp.
 
-import { EXCLUSIVE_PAIRS } from "./courses.js";
 import { pool } from "./pool.js";
+import { P } from "./programs.js";
+import { PROFILES } from "./program-i.js";
 
 export const STATUSES = {
   done: "Klar",
@@ -53,7 +56,7 @@ function dedupe(list) {
     kept.push(c);
   }
   const codes = new Map(kept.map((c) => [c.id ?? c.code, c]));
-  for (const [a, b] of EXCLUSIVE_PAIRS) {
+  for (const [a, b] of P().pairs) {
     if (codes.has(a) && codes.has(b)) {
       conflicts.push([codes.get(a), codes.get(b)]);
       kept = kept.filter((c) => (c.id ?? c.code) !== b);
@@ -96,46 +99,37 @@ export function evaluate(plan, statuses = ["done", "ongoing", "planned"]) {
     }
   }
 
-  const tsCourses = kept.filter((c) => c.type === "ts" && c.inPlan);
-  const tsCount = tsCourses.length;
-  const tsUsedHp = sum(tsCourses.slice(0, 3));
-
-  // Valbara tekniska/naturvetenskapliga kurser ur studieplanen, utöver de tre teknik och system-kurserna
-  const electiveTechNat =
-    sum(kept.filter((c) => c.inPlan && c.type !== "obl" && c.techNat)) - tsUsedHp;
+  const prog = P();
   const outside = sum(kept.filter((c) => !c.inPlan));
-
-  const checks = [
-    { id: "total", label: "Minst 300 hp totalt", value: total, target: 300, unit: "hp" },
-    {
+  const common = {
+    total: { id: "total", label: "Minst 300 hp totalt", value: total, target: 300, unit: "hp" },
+    mandatory: {
       id: "mandatory", label: "Alla obligatoriska kurser", value: missing.length === 0 ? 1 : 0, target: 1,
       detail: missing.length
         ? `Saknas: ${missing.slice(0, 4).map((m) => m.name).join(", ")}${missing.length > 4 ? ` och ${missing.length - 4} till` : ""}`
         : "Alla obligatoriska kurser finns med.",
       missing,
     },
-    {
-      id: "thesis", label: "Examensarbete 30 hp (A2E, teknik)", value: thesis ? 30 : 0, target: 30, unit: "hp",
-    },
-    { id: "advanced", label: "Minst 90 hp på avancerad nivå", value: advanced, target: 90, unit: "hp", detail: "Examensarbetet räknas in." },
-    { id: "teknik", label: "Minst 150 hp inom huvudområdet teknik", value: teknik, target: 150, unit: "hp" },
-    { id: "teknikAdv", label: "Minst 60 hp teknik på avancerad nivå", value: teknikAdv, target: 60, unit: "hp", detail: "Examensarbetet räknas in." },
-    { id: "a1f", label: "Minst 10 hp teknik på A1F-nivå", value: a1fTeknik, target: 10, unit: "hp", detail: "Examensarbetet räknas inte." },
-    {
-      id: "ts", label: "Minst 3 kurser \"teknik och system\"", value: tsCount, target: 3, unit: "st",
-      detail: tsCount ? tsCourses.map((c) => c.name.split(" – ")[0]).join(", ") : "Elkraftsystemanalys räknas också.",
-    },
-    {
-      id: "electives", label: "Minst 20 hp valbara tekniska/naturvetenskapliga kurser ur studieplanen",
-      value: Math.max(0, electiveTechNat), target: 20, unit: "hp",
-      detail: "Utöver de tre teknik och system-kurserna. Miljörätt, Ingenjörsetik och Stora sociotekniska system räknas inte.",
-    },
-  ];
+    thesis: { id: "thesis", label: "Examensarbete 30 hp (A2E, teknik)", value: thesis ? 30 : 0, target: 30, unit: "hp" },
+    advanced: { id: "advanced", label: "Minst 90 hp på avancerad nivå", value: advanced, target: 90, unit: "hp", detail: "Examensarbetet räknas in." },
+    teknik: { id: "teknik", label: "Minst 150 hp inom huvudområdet teknik", value: teknik, target: 150, unit: "hp" },
+    teknikAdv: { id: "teknikAdv", label: "Minst 60 hp teknik på avancerad nivå", value: teknikAdv, target: 60, unit: "hp", detail: "Examensarbetet räknas in." },
+  };
+
+  let checks;
+  if (prog.id === "I") checks = checksI(kept, common);
+  else if (prog.id === "ES") checks = checksES(kept, common, a1fTeknik);
+  else {
+    const a1f = sum(kept.filter((c) => c.level === "A1F"));
+    checks = [common.total, common.thesis, common.advanced,
+      { id: "a1f", label: "Minst 10 hp på A1F-nivå", value: a1f, target: 10, unit: "hp", detail: "Examensarbetet räknas inte." },
+      common.teknik, common.teknikAdv];
+  }
   for (const ch of checks) ch.ok = ch.value >= ch.target;
 
   const warnings = [];
-  if (outside > 30) {
-    warnings.push(`Du har ${outside} hp kurser utanför studieplanen. Normalt får högst 30 hp valfria kurser ingå i examen.`);
+  if (prog.courses.length && outside > prog.freeMax) {
+    warnings.push(`Du har ${outside} hp kurser utanför studieplanen. Högst ${prog.freeMax} hp valfria kurser får ingå i examen.`);
   }
   for (const [a, b] of conflicts) {
     warnings.push(`${a.name} (${a.code}) och ${b.name} (${b.code}) kan inte båda räknas in i examen. Bara ${a.name} räknas.`);
@@ -149,4 +143,63 @@ export function evaluate(plan, statuses = ["done", "ongoing", "planned"]) {
     checks, warnings, total, advanced, teknik, teknikAdv, outside,
     allOk: checks.every((c) => c.ok),
   };
+}
+
+// Energisystem (TES2Y)
+function checksES(kept, common, a1fTeknik) {
+  const tsCourses = kept.filter((c) => c.type === "ts" && c.inPlan);
+  const tsCount = tsCourses.length;
+  const tsUsedHp = sum(tsCourses.slice(0, 3));
+
+  // Valbara tekniska/naturvetenskapliga kurser ur studieplanen, utöver de tre teknik och system-kurserna
+  const electiveTechNat =
+    sum(kept.filter((c) => c.inPlan && c.type !== "obl" && c.techNat)) - tsUsedHp;
+
+  return [
+    common.total, common.mandatory, common.thesis, common.advanced, common.teknik, common.teknikAdv,
+    { id: "a1f", label: "Minst 10 hp teknik på A1F-nivå", value: a1fTeknik, target: 10, unit: "hp", detail: "Examensarbetet räknas inte." },
+    {
+      id: "ts", label: "Minst 3 kurser \"teknik och system\"", value: tsCount, target: 3, unit: "st",
+      detail: tsCount ? tsCourses.map((c) => c.name.split(" – ")[0]).join(", ") : "Elkraftsystemanalys räknas också.",
+    },
+    {
+      id: "electives", label: "Minst 20 hp valbara tekniska/naturvetenskapliga kurser ur studieplanen",
+      value: Math.max(0, electiveTechNat), target: 20, unit: "hp",
+      detail: "Utöver de tre teknik och system-kurserna. Miljörätt, Ingenjörsetik och Stora sociotekniska system räknas inte.",
+    },
+  ];
+}
+
+// Industriell ekonomi (TIE2Y): minst 20 hp i en profilering och 10 hp i den andra, sedan
+// ytterligare 10 hp som passar profilerna. Etik i teknik och organisering får räknas till vilken som helst.
+export function profileHp(kept) {
+  const hp = { aff: 0, dig: 0, both: 0 };
+  for (const c of kept) if (c.inPlan && c.profile) hp[c.profile] += c.hp;
+  // Fördela "båda"-kurserna så att kravet 20 + 10 uppfylls så långt det går
+  let best = null;
+  for (let x = 0; x <= hp.both; x += 5) {
+    const aff = hp.aff + x, dig = hp.dig + hp.both - x;
+    const main = Math.max(aff, dig), other = Math.min(aff, dig);
+    const score = Math.min(main, 20) + Math.min(other, 10);
+    if (!best || score > best.score) best = { aff, dig, main, other, score, mainId: aff >= dig ? "aff" : "dig" };
+  }
+  return { ...best, total: hp.aff + hp.dig + hp.both };
+}
+
+function checksI(kept, common) {
+  const a1f = sum(kept.filter((c) => c.level === "A1F"));
+  const pr = profileHp(kept);
+  const mainName = PROFILES[pr.mainId], otherName = PROFILES[pr.mainId === "aff" ? "dig" : "aff"];
+  const extra = Math.max(0, pr.total - Math.min(pr.main, 20) - Math.min(pr.other, 10));
+  return [
+    common.total, common.mandatory, common.thesis, common.advanced,
+    { id: "a1f", label: "Minst 10 hp på A1F-nivå", value: a1f, target: 10, unit: "hp", detail: "Examensarbetet räknas inte." },
+    common.teknik, common.teknikAdv,
+    { id: "profMain", label: "Minst 20 hp i en profilering", value: pr.main, target: 20, unit: "hp",
+      detail: pr.main ? `Flest hp i ${mainName}.` : "Välj kurser i Affärsutveckling och innovation eller Industriell analys och digitalisering." },
+    { id: "profOther", label: "Minst 10 hp i den andra profileringen", value: pr.other, target: 10, unit: "hp",
+      detail: `${otherName}.` },
+    { id: "profExtra", label: "Ytterligare 10 hp som passar profilerna", value: extra, target: 10, unit: "hp",
+      detail: "Räknar profileringskurser utöver 20 + 10 hp. Andra kurser kan också passa profilerna. Fråga studievägledningen." },
+  ];
 }

@@ -1,6 +1,8 @@
 import { LEVELS, KNOWN_AREAS } from "./courses.js";
 import { evaluate, STATUSES } from "./rules.js";
-import { pool, buildPool, courseById, coursesIn, courseData, offeringText, safeUrl, HP_KEYS, cleanReq } from "./pool.js";
+import { pool, buildPool, courseById, coursesIn, inFolder, courseData, offeringText, safeUrl, HP_KEYS, cleanReq } from "./pool.js";
+import { P, setProgram, PROGRAMS, PROGRAM_LIST } from "./programs.js";
+import { PROFILES } from "./program-i.js";
 import * as store from "./store.js";
 import { guideHTML } from "./guide.js";
 import { eligibility } from "./prereq.js";
@@ -31,7 +33,10 @@ const ICONS = {
 const state = {
   user: null,
   plan: store.emptyPlan(),
-  mates: [],
+  mates: [],      // andra studenter i samma program
+  allMates: [],   // alla andra studenter
+  admin: false,   // får godkänna förfrågningar om konto
+  requests: null,
   poolRows: { courseRows: [], folderRows: [] },
   grades: {},
   view: sessionGet("es-view") || "plan",
@@ -53,10 +58,86 @@ function sessionGet(k) { try { return sessionStorage.getItem(k); } catch { retur
 function sessionSet(k, v) { try { sessionStorage.setItem(k, v); } catch { /* ignorera */ } }
 const editorName = () => state.plan.name?.trim() || state.user?.email || "Okänd";
 
+// ---------- Program ----------
+// Ord för de andra studenterna i ens program: "ESare", "I-studenter" eller "studenter".
+const who = () => (P().id === "none" ? "studenter" : P().people);
+const Who = () => who()[0].toUpperCase() + who().slice(1);
+const one = () => ({ ES: "ESare", I: "I-student" })[P().id] || "student";
+const whoN = (n) => `${n} ${n === 1 ? one() : who()}`;
+
+// Byter färger, logga och texter efter programmet.
+function applyProgram(id) {
+  const prog = setProgram(id);
+  document.documentElement.dataset.program = prog.id;
+  try { localStorage.setItem("es-program", prog.id); } catch { /* ignorera */ }
+  $("#brand-icon").src = prog.icon;
+  $("#favicon").href = prog.icon;
+  $("#brand-name").textContent = prog.id === "none" ? "Civilingenjör" : prog.name;
+  document.title = `${prog.short ? prog.short + " " : ""}Masterplanering`;
+  $("#tab-people").textContent = Who();
+  const link = (url, text) => `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(text)}</a>`;
+  $("#footer").innerHTML = `${prog.studyPlanUrl
+    ? `Kraven bygger på ${link(prog.eduPlanUrl, "utbildningsplanen")} och ${link(prog.studyPlanUrl, "studieplanen")} för ${esc(prog.code)}, giltiga från HT 2026. `
+    : ""}Sidan är ett hjälpmedel. Det är Examensenheten som avgör om du får ut din examen.${prog.section ? ` · ${link(prog.section.url, prog.section.name)}` : ""}`;
+  return prog;
+}
+const savedProgram = () => { try { return localStorage.getItem("es-program") || "ES"; } catch { return "ES"; } };
+
+// Bara studenter i samma program visas (eget upplägg: alla).
+function filterMates() {
+  state.mates = P().id === "none" ? state.allMates : state.allMates.filter((m) => m.program === P().id);
+}
+
+// Byter program och bygger om kurspoolen. fresh: nytt konto, fyll i år 1–3.
+function chooseProgram(id, fresh) {
+  state.plan.program = id;
+  applyProgram(id);
+  filterMates();
+  buildPool(state.poolRows.courseRows, state.poolRows.folderRows);
+  state.poolFolder = "programplanen";
+  if (fresh) {
+    delete state.plan.isNew;
+    if (id !== "none") for (const y of [1, 2, 3]) fillMandatory(y, "done", true);
+    state.view = "plan";
+    state.year = id === "none" ? 1 : 4;
+    state.summer = null;
+  }
+  changed();
+  $("#tabs").hidden = false;
+  render();
+}
+
+function renderChooseProgram() {
+  $("#tabs").hidden = true;
+  app.innerHTML = `
+    <div class="card choose">
+      <h1>Vilket program går du?</h1>
+      <p class="muted">Programmet styr examenskraven och vilka kurser som rekommenderas. År 1–3 fylls i med programmets obligatoriska kurser, markerade som klara. Du kan byta program senare under Min plan.</p>
+      <div class="prog-cards">
+        ${PROGRAM_LIST.map((p) => `
+          <button class="prog-card" data-choose="${esc(p.id)}">
+            <img src="${esc(p.logo)}" alt="">
+            <strong>${esc(p.name)}</strong>
+            <span>${esc(p.full)} (${esc(p.code)})</span>
+          </button>`).join("")}
+        <button class="prog-card" data-choose="none">
+          <span class="prog-none" aria-hidden="true">${ICONS.plus}</span>
+          <strong>Fyll i själv</strong>
+          <span>Inget program. Du lägger in alla kurser själv och sidan kontrollerar bara de allmänna kraven för civilingenjörsexamen.</span>
+        </button>
+      </div>
+    </div>`;
+  app.onclick = (ev) => {
+    const b = ev.target.closest("[data-choose]");
+    if (b) chooseProgram(b.dataset.choose, true);
+  };
+}
+
 // ---------- Start och inloggning ----------
 
 async function start() {
   $("#demo-banner").hidden = !store.DEMO;
+  applyProgram(savedProgram());
   try {
     state.user = await store.getUser();
   } catch (e) {
@@ -81,21 +162,23 @@ async function afterLogin() {
   }
   $("#tabs").hidden = false;
   try {
-    const [plan, mates, poolRows, grades] = await Promise.all([
-      store.loadMyPlan(state.user), store.loadClassmates(state.user), store.loadPool(), store.loadGrades(state.user),
+    const [plan, mates, poolRows, grades, admin] = await Promise.all([
+      store.loadMyPlan(state.user), store.loadClassmates(state.user), store.loadPool(), store.loadGrades(state.user), store.isAdmin(state.user),
     ]);
-    Object.assign(state, { plan, mates, poolRows, grades });
+    Object.assign(state, { plan, allMates: mates, poolRows, grades, admin, requests: null });
+    applyProgram(plan.program);
+    filterMates();
     buildPool(poolRows.courseRows, poolRows.folderRows);
   } catch (e) {
     return showError(e);
   }
   if (state.summer && !state.plan.summers.includes(state.summer)) state.summer = null;
   if (state.year > state.plan.years) state.year = state.plan.years;
-  // Nya planer: år 1–3 fylls i med de obligatoriska kurserna som klara
-  if (state.plan.isNew) {
-    delete state.plan.isNew;
-    for (const y of [1, 2, 3]) fillMandatory(y, "done", true);
-  }
+  $("#tab-admin").hidden = !state.admin;
+  if (state.admin) refreshRequests();
+  if (state.view === "admin" && !state.admin) state.view = "plan";
+  // Nytt konto: välj program först. År 1–3 fylls sedan i med de obligatoriska kurserna som klara.
+  if (state.plan.isNew) return renderChooseProgram();
   render();
 }
 
@@ -108,27 +191,34 @@ function renderUser() {
   const el = $("#user");
   if (!state.user || store.DEMO) { el.innerHTML = ""; return; }
   el.innerHTML = `<span class="muted hide-sm">${esc(state.user.email)}</span> <button class="btn small" id="logout">Logga ut</button>`;
-  $("#logout").onclick = async () => { await flushSaves(); await store.signOut(); state.user = null; afterLogin(); };
+  $("#logout").onclick = async () => { await flushSaves(); await store.signOut(); state.user = null; state.admin = false; $("#tab-admin").hidden = true; afterLogin(); };
 }
 
-// Inloggning med e-post och lösenord. Lägen: login, signup, forgot, reset (nytt lösenord från mejllänk).
+// Inloggning med e-post och lösenord. Lägen: login, signup, forgot, reset (nytt lösenord från
+// mejllänk) och request (begär konto utan skolmail).
 function renderLogin(mode = "login", message = "", email = "") {
   const msg = message ? `<div class="msg ${message.startsWith("!") ? "err" : "ok"}">${esc(message.replace(/^!/, ""))}</div>` : "";
   const remember = (() => { try { return localStorage.getItem("es-remember") !== "0"; } catch { return true; } })();
   const T = {
     login: ["Logga in", "Logga in med din e-post och ditt lösenord.", "Logga in"],
-    signup: ["Skapa konto", "Du kan använda vilken e-postadress som helst. Vi skickar ett mejl så att du kan bekräfta adressen.", "Skapa konto"],
+    signup: ["Skapa konto", `Använd din skolmail (@${store.SCHOOL_DOMAIN}). Vi skickar ett mejl så att du kan bekräfta adressen.`, "Skapa konto"],
     forgot: ["Glömt lösenordet?", "Ange din e-post så skickar vi en länk där du kan välja ett nytt lösenord.", "Skicka länk"],
     reset: ["Välj nytt lösenord", "Skriv ditt nya lösenord två gånger.", "Spara lösenord"],
+    request: ["Begär ett konto", "Har du inte tillgång till din skolmail? Skicka en förfrågan med en annan adress. När vi har sett att du studerar vid Uppsala universitet godkänns adressen och du får ett mejl. Sedan skapar du kontot och väljer lösenord själv.", "Skicka förfrågan"],
   }[mode];
   const pw = (name, label, auto) => `<label class="field">${label}<input type="password" name="${name}" required minlength="8" autocomplete="${auto}"></label>`;
+  const requestLink = `<button class="linkish request-link" data-mode="request">Jag har inte tillgång till min skolmail</button>`;
   app.innerHTML = `
     <div class="card login">
-      <img src="assets/es-logo.png" alt="" class="login-logo">
+      <img src="${esc(P().logo)}" alt="" class="login-logo">
       <h1>${T[0]}</h1>
       <p class="muted">${T[1]}</p>
       <form id="login-form" novalidate>
-        ${mode !== "reset" ? `<label class="field">E-post<input type="email" name="email" required autocomplete="email" value="${esc(email)}"></label>` : ""}
+        ${mode === "request" ? `<label class="field">Namn<input name="name" required maxlength="80" autocomplete="name"></label>` : ""}
+        ${mode !== "reset" ? `<label class="field">${mode === "signup" ? "Skolmail" : "E-post"}<input type="email" name="email" required autocomplete="email" value="${esc(email)}" ${mode === "signup" ? `placeholder="fornamn.efternamn.1234@${store.SCHOOL_DOMAIN}"` : ""}></label>` : ""}
+        ${mode === "request" ? `
+          <label class="field">Program<select name="program">${PROGRAM_LIST.map((p) => `<option value="${esc(p.id)}" ${p.id === P().id ? "selected" : ""}>${esc(p.name)}</option>`).join("")}<option value="annat">Annat program</option></select></label>
+          <label class="field">Meddelande (valfritt)<textarea name="message" rows="3" maxlength="500" placeholder="Till exempel vilket år du började, eller varför du inte kommer åt skolmailen."></textarea></label>` : ""}
         ${mode === "login" ? pw("password", "Lösenord", "current-password") : ""}
         ${mode === "signup" || mode === "reset" ? pw("password", mode === "reset" ? "Nytt lösenord (minst 8 tecken)" : "Lösenord (minst 8 tecken)", "new-password") + pw("password2", "Upprepa lösenordet", "new-password") : ""}
         ${mode === "login" || mode === "signup" ? `<label class="check"><input type="checkbox" name="remember" ${remember ? "checked" : ""}> Kom ihåg mig på den här enheten</label>` : ""}
@@ -137,8 +227,9 @@ function renderLogin(mode = "login", message = "", email = "") {
       </form>
       <div class="login-links">
         ${mode === "login" ? `<button class="linkish" data-mode="forgot">Glömt lösenordet?</button><button class="linkish" data-mode="signup">Skapa konto</button>` : ""}
-        ${mode === "signup" || mode === "forgot" ? `<button class="linkish" data-mode="login">Tillbaka till inloggningen</button>` : ""}
+        ${mode === "signup" || mode === "forgot" || mode === "request" ? `<button class="linkish" data-mode="login">Tillbaka till inloggningen</button>` : ""}
       </div>
+      ${mode === "login" || mode === "signup" ? `<div class="login-links">${requestLink}</div>` : ""}
     </div>`;
 
   app.onclick = (ev) => {
@@ -158,14 +249,18 @@ function renderLogin(mode = "login", message = "", email = "") {
     if ((mode === "signup" || mode === "reset") && p1.length < 8) return fail("Lösenordet måste vara minst 8 tecken.");
     if ((mode === "signup" || mode === "reset") && p1 !== p2) return fail("Lösenorden är inte likadana.");
     if (mode === "login" && !p1) return fail("Skriv ditt lösenord.");
+    if (mode === "request" && !String(fd.get("name") || "").trim()) return fail("Skriv ditt namn.");
+    if (mode === "request" && store.isSchoolEmail(em)) return fail("Det är en skolmail. Välj Skapa konto i stället, så behövs ingen förfrågan.");
     const btn = form.querySelector('[type="submit"]');
     btn.disabled = true;
     try {
       if (mode === "login") {
         await store.signIn(em, p1, keep);
+        if (store.DEMO) { state.user = await store.getUser(); await afterLogin(); }
       } else if (mode === "signup") {
         const ready = await store.signUp(em, p1, keep);
         if (!ready) renderLogin("login", "Kolla din mejl och klicka på länken för att bekräfta adressen. Sedan kan du logga in.", em);
+        else if (store.DEMO) { state.user = await store.getUser(); await afterLogin(); }
       } else if (mode === "forgot") {
         await store.sendPasswordReset(em);
         renderLogin("login", "Om det finns ett konto med den adressen har vi skickat en länk för att välja nytt lösenord.", em);
@@ -174,6 +269,9 @@ function renderLogin(mode = "login", message = "", email = "") {
         state.recovery = false;
         history.replaceState(null, "", location.pathname);
         await afterLogin();
+      } else if (mode === "request") {
+        await store.requestAccess({ name: fd.get("name"), email: em, program: fd.get("program"), message: fd.get("message") });
+        renderLogin("login", "Tack! Förfrågan är skickad. När adressen är godkänd får du ett mejl. Välj då Skapa konto och använd samma adress.", em);
       }
     } catch (e) {
       fail(e.message);
@@ -295,6 +393,7 @@ function render() {
   else if (state.view === "pool") renderPool();
   else if (state.view === "grades") renderGrades();
   else if (state.view === "guide") renderGuide();
+  else if (state.view === "admin" && state.admin) renderAdmin();
   else renderMates();
 }
 
@@ -309,7 +408,7 @@ $("#tabs").addEventListener("click", (ev) => {
 // ---------- Guide ----------
 
 function renderGuide() {
-  app.innerHTML = guideHTML();
+  app.innerHTML = guideHTML(P());
   app.onclick = (ev) => {
     const a = ev.target.closest('a[href^="#g-"]');
     if (!a) return;
@@ -341,13 +440,16 @@ function renderPlan() {
     <div class="plan-layout">
       <div class="stack">
         <div class="card profile">
-          <label class="field">Namn (syns för andra ESare)
+          <label class="field">Namn (syns för andra ${who()})
             <input id="p-name" value="${esc(state.plan.name)}" maxlength="80" placeholder="För- och efternamn">
           </label>
           <label class="field">Startår
             <input id="p-year" type="number" min="2010" max="2040" value="${esc(state.plan.start_year ?? "")}" placeholder="t.ex. 2022">
           </label>
-          <label class="check" title="Kurserna du läser just nu syns alltid för andra ESare."><input id="p-hide-done" type="checkbox" ${state.plan.hide_done ? "checked" : ""}> Dölj min plan och avklarade kurser</label>
+          <label class="field">Program
+            <select id="p-program">${[...PROGRAM_LIST, PROGRAMS.none].map((p) => `<option value="${esc(p.id)}" ${p.id === P().id ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select>
+          </label>
+          <label class="check" title="Kurserna du läser just nu syns alltid för andra ${who()}."><input id="p-hide-done" type="checkbox" ${state.plan.hide_done ? "checked" : ""}> Dölj min plan och avklarade kurser</label>
         </div>
 
         <nav class="year-tabs" aria-label="Välj år eller sommar">${yearTabs()}</nav>
@@ -467,6 +569,13 @@ function bindPlan() {
     changed();
   };
   $("#p-hide-done").onchange = (e) => { state.plan.hide_done = e.target.checked; changed(); };
+  $("#p-program").onchange = (e) => {
+    const to = PROGRAMS[e.target.value];
+    if (!to || to.id === P().id) return;
+    const ok = confirm(`Byta till ${to.name}? Examenskraven, programplanen och vilka studenter du ser under fliken för ditt program byts. Kurserna i din plan ligger kvar.`);
+    if (!ok) { e.target.value = P().id; return; }
+    chooseProgram(to.id, false);
+  };
 
   app.onclick = (ev) => {
     const t = ev.target;
@@ -624,7 +733,8 @@ function courseTags(c) {
     <span>${esc(c.code || "")}${c.uni === "SLU" ? " · SLU" : ""}</span><span>${c.hp} hp</span>
     <span class="tag ${String(c.level).startsWith("A") ? "adv" : ""}">${esc(c.level)}</span>
     ${c.type === "obl" ? `<span class="tag obl">Obligatorisk</span>` : ""}
-    ${c.type === "ts" ? `<span class="tag ts">Teknik och system</span>` : ""}`;
+    ${c.type === "ts" ? `<span class="tag ts">Teknik och system</span>` : ""}
+    ${c.profile ? `<span class="tag ts" title="Profilering">${esc(c.profile === "both" ? "Båda profileringarna" : PROFILES[c.profile])}</span>` : ""}`;
 }
 
 // Var kursen hamnar om man klickar på (år, period, rad). Kursen läggs alltid i de
@@ -675,7 +785,7 @@ function pickEntry(c, ctx) {
           <span>Ges ${esc(offeringText(c).join(", "))}</span>
           ${c.year ? `<span>Rek. år ${esc(c.year)}</span>` : ""}
           ${!ctx.summer && !slot.err && slot.size?.thick ? `<span class="tag">Tar alla tre rader</span>` : !ctx.summer && !slot.err && slot.size?.h > 1 ? `<span class="tag">Tar ${slot.size.h} rader</span>` : ""}
-          ${mates ? `<span class="tag mates">${plural(mates, "ESare", "ESare")}</span>` : ""}
+          ${mates ? `<span class="tag mates">${whoN(mates)}</span>` : ""}
         </span>
         ${err ? `<span class="pick-err">${esc(err)}</span>`
           : off ? `<span class="pick-warn">${esc(slot.err)} Klicka för att lägga till ändå.</span>`
@@ -702,7 +812,7 @@ function renderPicker() {
     const take = (list) => list.filter((c) => !shown.has(c.id) && shown.add(c.id));
     const here = pool.courses.filter(runsHere);
     sections = [[`Rekommenderat år ${ctx.year}, ges i period ${ctx.period}`, take(here.filter((c) => c.year === ctx.year))]];
-    for (const f of pool.folders) sections.push([`${f.name} – ges i period ${ctx.period}`, take(here.filter((c) => c.folders.includes(f.id)))]);
+    for (const f of pool.folders) sections.push([`${f.name} – ges i period ${ctx.period}`, take(here.filter((c) => inFolder(c, f.id)))]);
     sections.push([`Övriga kurser i period ${ctx.period}`, take(here)]);
     sections.push(["Valfri period", take(pool.courses.filter((c) => c.anyPeriod))]);
   }
@@ -981,7 +1091,7 @@ function openItem(id) {
     <div class="seg" role="group" aria-label="Status">
       ${Object.entries(STATUSES).reverse().map(([k, l]) => `<button data-set-status="${k}" data-id="${esc(it.id)}" class="${it.status === k ? "on" : ""}" aria-pressed="${it.status === k}">${l}</button>`).join("")}
     </div>
-    ${c ? `<h3 class="pick-h">ESare som läser kursen</h3>
+    ${c ? `<h3 class="pick-h">${Who()} som läser kursen</h3>
       ${mates.length ? `<div class="people">${mates.map(({ m, it: mi }) => personChip(m, mi.status)).join("")}</div>` : `<p class="muted small">Ingen ännu.</p>`}` : ""}
     ${c?.oneOf ? pool.courses.filter((x) => x.oneOf === c.oneOf && x.id !== c.id).map((alt) => `
       <h3 class="pick-h">Byt variant</h3>
@@ -1108,7 +1218,7 @@ function renderReqs() {
 const folderHp = (id) => coursesIn(id).reduce((s, c) => s + c.hp, 0);
 
 function renderPool() {
-  if (state.poolFolder !== "all" && !pool.folders.some((f) => f.id === state.poolFolder)) state.poolFolder = "programplanen";
+  if (state.poolFolder !== "all" && !pool.folders.some((f) => f.id === state.poolFolder)) state.poolFolder = pool.folders[0]?.id || "all";
   const fid = state.poolFolder;
   const folder = pool.folders.find((f) => f.id === fid);
   const q = state.poolQuery.trim().toLowerCase();
@@ -1138,8 +1248,8 @@ function renderPool() {
           </div>
           <p class="folder-desc">${fid === "all" ? "Alla kurser i kurspoolen, från alla mappar." : esc(folder.description) || `<span class="muted">Ingen beskrivning.</span>`}</p>
           <div class="toolbar">
-            ${fid !== "all" ? `<button class="btn small" id="edit-folder">Ändra mapp</button>` : ""}
-            <button class="btn small primary" id="new-course">${ICONS.plus} Ny kurs${fid !== "all" ? " i mappen" : ""}</button>
+            ${fid !== "all" && !folder.virtual ? `<button class="btn small" id="edit-folder">Ändra mapp</button>` : ""}
+            <button class="btn small primary" id="new-course">${ICONS.plus} Ny kurs${fid !== "all" && !folder.virtual ? " i mappen" : ""}</button>
             ${folder?.updated_by ? `<span class="muted small">Senast ändrad av ${esc(folder.updated_by)}</span>` : ""}
           </div>
         </div>
@@ -1161,7 +1271,7 @@ function renderPool() {
 function poolCourseCard(c) {
   const mates = matesFor(c.id).length;
   const mine = placedWhere(c.id);
-  const folders = pool.folders.filter((f) => c.folders.includes(f.id));
+  const folders = pool.folders.filter((f) => inFolder(c, f.id));
   return `
     <details class="card pool-course">
       <summary>
@@ -1175,7 +1285,7 @@ function poolCourseCard(c) {
         <div class="pc-side">
           ${offeringText(c).map((t) => `<span class="sem">${esc(t)}</span>`).join("")}
           ${mine ? `<span class="tag ts">I din plan</span>` : ""}
-          ${mates ? `<span class="tag mates">${plural(mates, "ESare", "ESare")}</span>` : ""}
+          ${mates ? `<span class="tag mates">${whoN(mates)}</span>` : ""}
         </div>
       </summary>
       <div class="pc-body">
@@ -1284,7 +1394,7 @@ function openFolderEditor(folder) {
       dlg.close();
       await poolWrite(() => store.deletePoolFolder(folder.id), () => {
         state.poolRows.folderRows = state.poolRows.folderRows.filter((r) => r.id !== folder.id);
-        state.poolFolder = "programplanen";
+        state.poolFolder = pool.folders[0]?.id || "all";
       });
     }
   });
@@ -1312,7 +1422,7 @@ function openFolderPicker(c) {
         <button type="button" class="icon-btn" data-close aria-label="Stäng">✕</button>
       </div>
       <div class="checks">
-        ${pool.folders.map((f) => `<label class="check"><input type="checkbox" name="f" value="${esc(f.id)}" ${c.folders.includes(f.id) ? "checked" : ""}> ${esc(f.name)}</label>`).join("")}
+        ${pool.folders.filter((f) => !f.virtual).map((f) => `<label class="check"><input type="checkbox" name="f" value="${esc(f.id)}" ${c.folders.includes(f.id) ? "checked" : ""}> ${esc(f.name)}</label>`).join("")}
       </div>
       <div class="dlg-foot"><span></span><button class="btn primary" type="submit">Spara</button></div>
     </form>`);
@@ -1386,7 +1496,7 @@ const PERIOD_OPTS = { HT: [["", "Ges inte"], ["1", "Period 1"], ["2", "Period 2"
 
 function openCourseEditor(c) {
   const isNew = !c;
-  const cur = c || { name: "", code: "", hp: 5, level: "A1N", areas: ["Teknik"], prereq: "", url: "", note: "", offerings: [], anyPeriod: false, summer: false, year: null, folders: state.poolFolder !== "all" ? [state.poolFolder] : [] };
+  const cur = c || { name: "", code: "", hp: 5, level: "A1N", areas: ["Teknik"], prereq: "", url: "", note: "", offerings: [], anyPeriod: false, summer: false, year: null, folders: state.poolFolder !== "all" && !pool.folders.find((f) => f.id === state.poolFolder)?.virtual ? [state.poolFolder] : [] };
   const semVal = (sem) => cur.offerings.find((o) => o.sem === sem)?.periods.join(",") || "";
   const extraAreas = cur.areas.filter((a) => !KNOWN_AREAS.includes(a));
   openDialog(`
@@ -1432,7 +1542,7 @@ function openCourseEditor(c) {
         <label class="field wide">Anteckning<input name="note" maxlength="300" value="${esc(cur.note)}"></label>
         <fieldset class="wide">
           <legend>Mappar</legend>
-          <div class="checks">${pool.folders.map((f) => `<label class="check"><input type="checkbox" name="folders" value="${esc(f.id)}" ${cur.folders.includes(f.id) ? "checked" : ""}> ${esc(f.name)}</label>`).join("")}</div>
+          <div class="checks">${pool.folders.filter((f) => !f.virtual).map((f) => `<label class="check"><input type="checkbox" name="folders" value="${esc(f.id)}" ${cur.folders.includes(f.id) ? "checked" : ""}> ${esc(f.name)}</label>`).join("")}</div>
         </fieldset>
         <p class="pick-err wide" id="course-err"></p>
       </div>
@@ -1618,7 +1728,7 @@ function renderGrades() {
     <div class="stack">
       <div>
         <h1>Mina betyg</h1>
-        <p class="muted" style="margin:0">Fyll i betyg för kurser som är markerade som klara i din plan. Betygen sparas bara för dig och visas aldrig för andra ESare.</p>
+        <p class="muted" style="margin:0">Fyll i betyg för kurser som är markerade som klara i din plan. Betygen sparas bara för dig och visas aldrig för andra ${who()}.</p>
       </div>
       <div class="stats">
         <div class="card stat main"><span class="stat-label">Viktat snitt</span><span class="stat-value">${gpa ? gpa.toFixed(2) : "–"}</span><span class="muted small">viktat med hp, betyg 3–5</span></div>
@@ -1711,14 +1821,14 @@ function renderMates() {
         </div>
         <div>
           ${same.length ? `<div class="people">${same.map(({ m, mi }) => personChip(m, mi.status)).join("")}</div>`
-            : `<span class="muted small">Ingen annan ESare läser den samtidigt.</span>`}
+            : `<span class="muted small">Ingen annan ${one()} läser den samtidigt.</span>`}
           ${other.length ? `<div class="other-time"><span class="muted small">Vid annan tid:</span> <div class="people">${other.map(({ m, mi }) => personChip(m, mi.status)).join("")}</div></div>` : ""}
         </div>
       </div>`;
   }).join("");
 
   // 2. Sök ESare eller kurs
-  let searchHtml = `<p class="muted small" style="margin:0">Sök på ett namn för att se en ESares hela plan, eller på en kurs för att se vilka som läser den.</p>`;
+  let searchHtml = `<p class="muted small" style="margin:0">Sök på ett namn för att se en persons hela plan, eller på en kurs för att se vilka som läser den.</p>`;
   if (q) {
     const people = state.mates.filter((m) => m.name.toLowerCase().includes(q));
     const courses = new Map();
@@ -1736,20 +1846,20 @@ function renderMates() {
     }
     const list = [...courses.values()].sort((a, b) => b.takers.length - a.takers.length).slice(0, 30);
     searchHtml = `
-      ${people.length ? `<h3 class="pick-h">ESare</h3><div class="people">${people.map((m) => personChip(m, "planned").replace(/<span class="dot[^>]*><\/span>/, "")).join("")}</div>` : ""}
+      ${people.length ? `<h3 class="pick-h">${Who()}</h3><div class="people">${people.map((m) => personChip(m, "planned").replace(/<span class="dot[^>]*><\/span>/, "")).join("")}</div>` : ""}
       ${list.length ? `<h3 class="pick-h">Kurser</h3>${list.map((x) => `
         <div class="mate-course compact">
           <div><div class="course-name">${esc(x.name)}</div><div class="course-meta">${x.code ? `<span>${esc(x.code)}</span>` : ""}<span>${x.hp} hp</span></div></div>
           <div class="people">${x.takers.map(({ m, it }) => personChip(m, it.status)).join("")}</div>
         </div>`).join("")}` : ""}
-      ${!people.length && !list.length ? `<p class="muted small" style="margin:0">Ingen annan ESare eller kurs matchar "${esc(state.mateQuery.trim())}".</p>` : ""}`;
+      ${!people.length && !list.length ? `<p class="muted small" style="margin:0">Ingen annan ${one()} eller kurs matchar "${esc(state.mateQuery.trim())}".</p>` : ""}`;
   }
 
   app.innerHTML = `
     <div class="stack">
       <div>
-        <h1>ESare</h1>
-        <p class="muted" style="margin:0">Sidan är öppen för alla ESare. Se vilka som läser samma kurser som du, samtidigt, och klicka på en person för att se hela hens plan. ${plural(state.mates.length, "ESare", "ESare")} har lagt in sina kurser.</p>
+        <h1>${Who()}</h1>
+        <p class="muted" style="margin:0">Sidan är öppen för alla ${who()}. Se vilka som läser samma kurser som du, samtidigt, och klicka på en person för att se hela hens plan. ${whoN(state.mates.length)} har lagt in sina kurser.</p>
       </div>
       <div class="legend"><span><span class="dot done"></span> Klar</span><span><span class="dot ongoing"></span> Läser nu</span><span><span class="dot planned"></span> Planerar</span></div>
 
@@ -1760,7 +1870,7 @@ function renderMates() {
 
       <section class="card">
         <h2 style="margin:0 0 10px">Sök</h2>
-        <input type="search" id="mate-q" placeholder="Sök ESare eller kurs" value="${esc(state.mateQuery)}" style="width:100%">
+        <input type="search" id="mate-q" placeholder="Sök person eller kurs" value="${esc(state.mateQuery)}" style="width:100%">
         <div id="mate-results" style="margin-top:10px">${searchHtml}</div>
       </section>
     </div>`;
@@ -1815,6 +1925,121 @@ function openPerson(i) {
         <ul>${b.list.map(rowHtml).join("")}</ul>`).join("") || `<p class="muted">Inga kurser att visa.</p>`}
     </div>
     <div class="dlg-foot"><span></span><button class="btn" data-close>Stäng</button></div>`);
+}
+
+// ---------- Förfrågningar om konto (bara administratörer) ----------
+
+async function refreshRequests() {
+  try {
+    state.requests = await store.loadRequests();
+  } catch (e) {
+    state.requests = { error: e.message, requests: [], allowed: [] };
+  }
+  const open = state.requests.requests.filter((r) => r.status === "new").length;
+  $("#tab-admin").innerHTML = `Förfrågningar${open ? `<span class="badge">${open}</span>` : ""}`;
+  if (state.view === "admin") renderAdmin();
+}
+
+const siteAddress = () => location.origin + location.pathname;
+// Mejl till den som fått sitt konto godkänt (öppnas i ens eget mejlprogram)
+function approvalMail(r) {
+  const subject = "Ditt konto till Masterplaneringen är godkänt";
+  const body = `Hej ${r.name || ""}!
+
+Din förfrågan är godkänd. Gå till ${siteAddress()} och välj "Skapa konto". Använd adressen ${r.email} och välj ett lösenord. Du får sedan ett mejl där du bekräftar adressen.
+
+Hälsningar`;
+  return `mailto:${encodeURIComponent(r.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
+function renderAdmin(notice = null) {
+  if (!state.requests) { app.innerHTML = `<p class="muted">Laddar förfrågningar…</p>`; refreshRequests(); return; }
+  const { requests, allowed, error } = state.requests;
+  const open = requests.filter((r) => r.status === "new");
+  const done = requests.filter((r) => r.status !== "new");
+  const progName = (id) => PROGRAMS[id]?.name || (id === "annat" ? "Annat program" : id || "");
+  const when = (t) => (t ? new Date(t).toLocaleDateString("sv-SE") : "");
+  const item = (r, actions) => `
+    <div class="req-item">
+      <div>
+        <div class="course-name">${esc(r.name)}</div>
+        <div class="course-meta"><span>${esc(r.email)}</span>${r.program ? `<span>${esc(progName(r.program))}</span>` : ""}<span>${esc(when(r.created_at))}</span>
+          ${r.status === "approved" ? `<span class="tag ts">Godkänd</span>` : r.status === "rejected" ? `<span class="tag">Avslagen</span>` : ""}</div>
+      </div>
+      <div class="toolbar">${actions}</div>
+      ${r.message ? `<p class="req-msg">${esc(r.message)}</p>` : ""}
+    </div>`;
+
+  app.innerHTML = `
+    <div class="stack">
+      <div>
+        <h1>Förfrågningar om konto</h1>
+        <p class="muted" style="margin:0">Studenter som inte kommer åt sin skolmail (@${esc(store.SCHOOL_DOMAIN)}) kan begära ett konto med en annan adress.
+        Kontrollera att personen studerar vid UU, till exempel i en klasslista eller genom att fråga, och godkänn sedan adressen.
+        Därefter kan personen skapa kontot och välja lösenord själv. Konton som redan finns påverkas inte.</p>
+      </div>
+      ${error ? `<div class="card msg err">Kunde inte läsa förfrågningarna: ${esc(error)}. Har du kört den nya delen av supabase/schema.sql?</div>` : ""}
+      ${notice ? `<div class="mail-note">${notice}</div>` : ""}
+      <section class="card" style="padding:0">
+        <h2 class="card-title">Väntar på svar (${open.length})</h2>
+        ${open.length ? open.map((r) => item(r, `
+          <button class="btn small ghost danger" data-reject="${esc(r.id)}">Avslå</button>
+          <button class="btn small primary" data-approve="${esc(r.id)}">Godkänn</button>`)).join("")
+          : `<p class="muted empty-pad">Inga nya förfrågningar.</p>`}
+      </section>
+      <section class="card">
+        <h2 style="margin-top:0">Godkända adresser</h2>
+        <p class="muted small">De här adresserna kan skapa konto fast de inte är skolmail. Fick du en förfrågan på annat sätt, till exempel i ett meddelande, kan du lägga till adressen här.</p>
+        <form id="allow-form" class="toolbar">
+          <input type="email" name="email" required placeholder="namn@example.com" style="flex:1;min-width:220px" aria-label="E-postadress att godkänna">
+          <button class="btn small primary" type="submit">Godkänn adress</button>
+        </form>
+        <div class="allowed-list" style="margin-top:10px">${allowed.map((a) => `<span>${esc(a.email)}<button type="button" data-unallow="${esc(a.email)}" aria-label="Ta bort ${esc(a.email)}" title="Ta bort">✕</button></span>`).join("") || `<span class="muted small" style="background:none">Inga ännu.</span>`}</div>
+      </section>
+      ${done.length ? `
+        <details class="card" style="padding:0">
+          <summary class="card-title" style="cursor:pointer">Tidigare förfrågningar (${done.length})</summary>
+          ${done.map((r) => item(r, r.status === "approved" ? `<a class="btn small" href="${esc(approvalMail(r))}">Mejla igen</a>` : "")).join("")}
+        </details>` : ""}
+    </div>`;
+
+  const find = (id) => requests.find((r) => String(r.id) === id);
+  app.onclick = async (ev) => {
+    const ap = ev.target.closest("[data-approve]");
+    if (ap) {
+      const r = find(ap.dataset.approve);
+      ap.disabled = true;
+      try {
+        await store.allowEmail(r.email, r.id);
+        await refreshRequests();
+        renderAdmin(`<strong>${esc(r.email)} är godkänd.</strong> Skicka ett mejl så att ${esc(r.name)} vet att kontot kan skapas:
+          <a class="btn small primary" href="${esc(approvalMail(r))}" style="margin-left:8px">Skriv mejl</a>`);
+      } catch (e) { alert("Kunde inte godkänna: " + e.message); ap.disabled = false; }
+      return;
+    }
+    const rj = ev.target.closest("[data-reject]");
+    if (rj) {
+      const r = find(rj.dataset.reject);
+      if (!confirm(`Avslå förfrågan från ${r.name} (${r.email})?`)) return;
+      try { await store.rejectRequest(r.id); await refreshRequests(); } catch (e) { alert("Kunde inte avslå: " + e.message); }
+      return;
+    }
+    const un = ev.target.closest("[data-unallow]");
+    if (un) {
+      if (!confirm(`Ta bort ${un.dataset.unallow} från de godkända adresserna? Ett konto som redan finns ligger kvar.`)) return;
+      try { await store.removeAllowedEmail(un.dataset.unallow); await refreshRequests(); } catch (e) { alert("Kunde inte ta bort: " + e.message); }
+    }
+  };
+  $("#allow-form").onsubmit = async (ev) => {
+    ev.preventDefault();
+    const email = String(new FormData(ev.target).get("email") || "").trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return alert("Skriv en giltig e-postadress.");
+    try {
+      await store.allowEmail(email);
+      await refreshRequests();
+      renderAdmin(`<strong>${esc(email)} är godkänd.</strong> Personen kan nu välja Skapa konto med adressen.`);
+    } catch (e) { alert("Kunde inte godkänna: " + e.message); }
+  };
 }
 
 start();

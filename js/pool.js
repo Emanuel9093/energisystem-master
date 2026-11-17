@@ -1,19 +1,25 @@
-// Kurspoolen: kurserna från studieplanen (courses.js) plus mappar och kurser som
+// Kurspoolen: kurserna från programmens studieplaner plus mappar och kurser som
 // studenterna själva lagt till eller ändrat (sparas i databasen).
+//
+// Poolen byggs för det program som den inloggade går (programs.js). Det egna programmets
+// kurser är "studieplanens kurser" (obligatoriska, rekommenderat år osv). Andra programs
+// kurser finns också med, men räknas som kurser utanför studieplanen.
 //
 // En kurs i poolen:
 //   id, code, name, hp, level, areas[], teknik, prereq, url, note
 //   offerings: [{ sem: "HT" | "VT", periods: [1, 2] }]   perioder 1–4 inom läsåret
 //   anyPeriod: true om kursen kan läsas valfri period, summer: true för sommarkurs
 //   year: rekommenderat år (1–5) eller null
-//   folders: [mapp-id]
-//   type, oneOf, thick, techNat, inStudyPlan: används av examenskontrollen och kommer
+//   folders: [mapp-id]  (bara mappar som studenterna själva styr, inte programplanerna)
+//   progs: [program-id]  vilka programs studieplaner kursen finns i
+//   type, oneOf, thick, techNat, profile, inStudyPlan: används av examenskontrollen och kommer
 //   ALLTID från koden (studieplanen), aldrig från databasen.
 
-import { COURSES, AREAS, LEVELS, periodsOf, yearOfTerm } from "./courses.js";
+import { LEVELS, periodsOf, yearOfTerm } from "./courses.js";
 import { INFO } from "./course-info.js";
 import { SEED_FOLDERS, SEED_EXTRA_COURSES } from "./folders.js";
 import { REQS } from "./reqs.js";
+import { P, PROGRAM_LIST, PLAN_FOLDER, progFolder, isVirtualFolder } from "./programs.js";
 
 export const pool = { courses: [], byId: {}, folders: [], seedIds: new Set(), overridden: new Set() };
 
@@ -35,7 +41,7 @@ export function cleanReq(r) {
     .filter(Boolean).slice(0, 20);
   return { hp, c };
 }
-const RULE_FIELDS = ["type", "oneOf", "thick", "techNat", "inStudyPlan", "uni"];
+const RULE_FIELDS = ["type", "oneOf", "thick", "techNat", "inStudyPlan", "uni", "profile", "progs"];
 
 const semOf = (periods) => (periods[0] <= 2 ? "HT" : "VT");
 
@@ -63,24 +69,28 @@ function cleanOfferings(list) {
   return out;
 }
 
-function fromStudyPlan(c) {
+const addOffering = (offerings, periods) => {
+  if (!periods) return;
+  const o = { sem: semOf(periods), periods };
+  if (!offerings.some((x) => x.sem === o.sem && x.periods.join() === o.periods.join())) offerings.push(o);
+};
+
+// own = kursen finns i studieplanen för den inloggades program
+function fromStudyPlan(c, prog, own) {
   const offerings = [];
-  const add = (periods) => {
-    if (!periods) return;
-    const o = { sem: semOf(periods), periods };
-    if (!offerings.some((x) => x.sem === o.sem && x.periods.join() === o.periods.join())) offerings.push(o);
-  };
-  add(periodsOf(c));
-  for (const [, periods] of c.extra || []) add(periods);
-  const areas = AREAS[c.code] || (c.teknik ? ["Teknik"] : []);
+  addOffering(offerings, periodsOf(c));
+  for (const [, periods] of c.extra || []) addOffering(offerings, periods);
+  const areas = prog.areas[c.code] || (c.teknik ? ["Teknik"] : []);
   const info = INFO[c.code] || {};
-  return {
+  const base = {
     id: c.code, code: c.code, name: c.name, hp: c.hp, level: c.level, areas, teknik: areas.includes("Teknik"),
-    prereq: info.prereq || "", url: info.url || "", note: c.note || "", req: cleanReq(REQS[c.code]),
-    offerings, anyPeriod: !periodsOf(c) && c.term !== "S", summer: c.term === "S",
-    year: yearOfTerm(c.term), folders: ["programplanen"],
-    type: c.type, oneOf: c.oneOf, thick: !!c.thick, techNat: c.techNat !== false, uni: c.uni, inStudyPlan: true,
+    prereq: info.prereq || "", url: info.url || `https://www.uu.se/utbildning/kurs?query=${c.code}`, note: own ? c.note || "" : "",
+    req: cleanReq(REQS[c.code]), offerings, anyPeriod: !periodsOf(c) && c.term !== "S", summer: c.term === "S",
+    folders: [], progs: [prog.id], uni: c.uni,
   };
+  return own
+    ? { ...base, year: yearOfTerm(c.term), type: c.type, oneOf: c.oneOf, thick: !!c.thick, techNat: c.techNat !== false, profile: c.profile, inStudyPlan: true }
+    : { ...base, year: null, type: "extern", oneOf: undefined, thick: !!c.thick, techNat: true, profile: undefined, inStudyPlan: false };
 }
 
 // Tvättar en kurs så att trasig eller elak data inte kan krascha sidan eller ändra reglerna.
@@ -103,19 +113,55 @@ function normalizeCourse(c, seed) {
     anyPeriod: !!c.anyPeriod,
     summer: !!c.summer,
     year: Number.isInteger(year) && year >= 1 && year <= 5 ? year : null,
-    folders: (Array.isArray(c.folders) ? c.folders : []).map((f) => str(f, 40)).filter(Boolean),
+    // Programplanernas mappar räknas ut från koden och sparas aldrig på kursen.
+    folders: [...new Set((Array.isArray(c.folders) ? c.folders : []).map((f) => str(f, 40)).filter((f) => f && !isVirtualFolder(f)))],
     req: cleanReq(c.req),
     updated_by: str(c.updated_by, 120),
     updated_at: c.updated_at,
   };
   // Regelfält: från studieplanen för dess kurser, annars en extern kurs.
-  if (seed) for (const k of RULE_FIELDS) course[k] = seed[k];
-  else Object.assign(course, { type: "extern", oneOf: undefined, thick: !!c.thick, techNat: true, inStudyPlan: false, uni: str(c.uni, 4) });
+  if (seed) {
+    for (const k of RULE_FIELDS) course[k] = seed[k];
+    // Rekommenderat år för studieplanens kurser kommer alltid från programmets studieplan.
+    if (seed.inStudyPlan) course.year = seed.year;
+  } else {
+    Object.assign(course, { type: "extern", oneOf: undefined, thick: !!c.thick, techNat: true, inStudyPlan: false, uni: str(c.uni, 4), profile: undefined, progs: [] });
+  }
   return course;
 }
 
+// Kurserna från koden för det valda programmet: först programmets egna, sedan andra
+// programs kurser (som externa kurser), sist de extra kurserna i folders.js.
+function programCourses() {
+  const cur = P();
+  const list = [];
+  const byId = {};
+  for (const x of cur.courses) {
+    const c = fromStudyPlan(x, cur, true);
+    list.push(c);
+    byId[c.id] = c;
+  }
+  for (const prog of PROGRAM_LIST) {
+    if (prog === cur) continue;
+    for (const x of prog.courses) {
+      const have = byId[x.code];
+      if (have) {
+        // Samma kurs i flera program: alla tillfällen gäller
+        const other = fromStudyPlan(x, prog, false);
+        for (const o of other.offerings) addOffering(have.offerings, o.periods);
+        if (!have.progs.includes(prog.id)) have.progs.push(prog.id);
+        continue;
+      }
+      const c = fromStudyPlan(x, prog, false);
+      list.push(c);
+      byId[c.id] = c;
+    }
+  }
+  return list;
+}
+
 const SEED = () => {
-  const list = [...COURSES.map(fromStudyPlan), ...SEED_EXTRA_COURSES.map((c) => normalizeCourse({ req: REQS[c.id], ...c }, null))];
+  const list = [...programCourses(), ...SEED_EXTRA_COURSES.map((c) => normalizeCourse({ req: REQS[c.id], ...c }, null))];
   for (const c of list) {
     if (c.thick === undefined) c.thick = false;
     if (c.summer && !c.folders.includes("sommarkurser")) c.folders.push("sommarkurser");
@@ -149,9 +195,20 @@ export function buildPool(courseRows = [], folderRows = []) {
   pool.byId = byId;
   pool.courses = Object.values(byId);
 
-  const folders = SEED_FOLDERS.map((f) => ({ ...f, builtin: true }));
+  // Programplanernas mappar: den egna först, sedan en mapp per annat program. De går inte att ändra.
+  const cur = P();
+  const folders = [];
+  if (cur.courses.length) folders.push({ id: PLAN_FOLDER, name: "Programplanen", description: cur.planDesc, sort: 1, builtin: true, virtual: true });
+  for (const prog of PROGRAM_LIST) {
+    if (prog === cur) continue;
+    folders.push({
+      id: progFolder(prog.id), name: `Programplanen för ${prog.name.toLowerCase()} (${prog.short})`, sort: 6, builtin: true, virtual: true,
+      description: `Kurserna i studieplanen för ${prog.full} (${prog.code}). ${cur.courses.length ? "De ingår inte i din studieplan, så de räknas som valfria kurser i din examen." : ""}`,
+    });
+  }
+  folders.push(...SEED_FOLDERS.map((f) => ({ ...f, builtin: true })));
   for (const r of folderRows) {
-    if (!r || typeof r.id !== "string") continue;
+    if (!r || typeof r.id !== "string" || isVirtualFolder(r.id)) continue;
     const i = folders.findIndex((f) => f.id === r.id);
     const f = {
       ...(i >= 0 ? folders[i] : { builtin: false }),
@@ -165,8 +222,14 @@ export function buildPool(courseRows = [], folderRows = []) {
 }
 
 export const courseById = (id) => pool.byId[id];
-// Mappen Sommarkurser innehåller alla kurser som är markerade som sommarkurs.
-export const coursesIn = (folderId) => pool.courses.filter((c) => c.folders.includes(folderId) || (folderId === "sommarkurser" && c.summer));
+// Ligger kursen i mappen? Programplanerna räknas ut från studieplanerna, och mappen
+// Sommarkurser innehåller alla kurser som är markerade som sommarkurs.
+export function inFolder(c, folderId) {
+  if (folderId === PLAN_FOLDER) return !!c.inStudyPlan;
+  if (folderId.startsWith("prog-")) return (c.progs || []).includes(folderId.slice(5));
+  return c.folders.includes(folderId) || (folderId === "sommarkurser" && c.summer);
+}
+export const coursesIn = (folderId) => pool.courses.filter((c) => inFolder(c, folderId));
 
 // Vad som sparas i databasen för en kurs: bara redigerbara fält, och för
 // studieplanens kurser bara det som skiljer sig från studieplanen.

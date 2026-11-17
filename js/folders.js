@@ -1,13 +1,8 @@
 // Mappar som finns från början i kurspoolen, och kurser utanför studieplanen.
+// Mapparna med programplanerna skapas i pool.js utifrån programs.js.
 // Studenterna kan ändra beskrivningar, kurser och mappinnehåll i Kurspoolen.
 
 export const SEED_FOLDERS = [
-  {
-    id: "programplanen",
-    name: "Programplanen",
-    description: "Alla kurser i studieplanen för Civilingenjörsprogrammet i energisystem (TES2Y), giltig från HT 2026. Kurserna kan räknas in i examen utan särskilt beslut.",
-    sort: 1,
-  },
   {
     id: "entreprenorskap",
     name: "Teknikbaserat entreprenörskap",
@@ -32,7 +27,7 @@ export const SEED_FOLDERS = [
     name: "Sommarkurser",
     description:
       "Kurser som läses under sommaren, ofta på distans. Lägg till en sommar med plustecknet mellan två år under Min plan. Sommarkurser kan bara läggas på en sommar. " +
-      "Kurser som inte står i studieplanen räknas till de 30 hp som får väljas fritt. Ändra en kurs och bocka i Sommar om den ska finnas här.",
+      "Kurser som inte står i studieplanen räknas till de valfria kurserna. Ändra en kurs och bocka i Sommar om den ska finnas här.",
     sort: 4,
     courseIds: [],
   },
@@ -40,7 +35,7 @@ export const SEED_FOLDERS = [
     id: "utbyte",
     name: "Utbytesstudier",
     description:
-      "Kurser som ES-studenter har läst på utbyte, så att du ser vad andra har tagit med sig hem. Ange universitet och land i kursens anteckning. " +
+      "Kurser som studenter har läst på utbyte, så att du ser vad andra har tagit med sig hem. Ange universitet och land i kursens anteckning. " +
       "Utbyteskurser kan räknas som valbara eller valfria kurser, men det kräver ett beslut om tillgodoräknande. Kontakta studievägledningen innan du åker. " +
       "Kurser som bara gäller dig kan du i stället lägga till som privat kurs i kursväljaren.",
     sort: 5,
